@@ -2,3 +2,4 @@
 hardware-info.toml
 
 secrets/
+__pycache__/
