@@ -153,7 +153,25 @@ function step_apply_chezmoi
     log_step "Chezmoi dotfiles applied."
 end
 
-# ─── Step 7: Set default shell to fish ───
+# ─── Step 7: Set hostname ───
+function step_set_hostname
+    log_step "Setting hostname..."
+    set -l current (hostname)
+    echo "  Current hostname: $current"
+    read -P "Set hostname to polaris-1? [y/N] or type a different name: " choice
+    switch $choice
+        case y Y
+            sudo hostnamectl set-hostname polaris-1
+            log_step "Hostname set to polaris-1."
+        case n N ''
+            log_warn "Skipped hostname setup."
+        case '*'
+            sudo hostnamectl set-hostname $choice
+            log_step "Hostname set to $choice."
+    end
+end
+
+# ─── Step 8: Set default shell to fish ───
 function step_set_fish_shell
     log_step "Setting default shell to fish..."
     if test $SHELL = /usr/bin/fish
@@ -164,7 +182,56 @@ function step_set_fish_shell
     log_step "Default shell set to fish. Log out and back in for it to take effect."
 end
 
-# ─── Step 8: Post-install reminders ───
+# ─── Step 9: Apply system configs ───
+function step_apply_system_configs
+    log_step "Applying system configuration files..."
+    set -l sysconf $SCRIPT_DIR/system-config
+    if not test -d $sysconf
+        log_error "system-config/ directory not found in repo."
+        return 1
+    end
+
+    # mkinitcpio
+    if test -f $sysconf/mkinitcpio.conf
+        log_warn "Will overwrite /etc/mkinitcpio.conf"
+        read -P "Apply mkinitcpio.conf? [y/N] " confirm
+        if test "$confirm" = y -o "$confirm" = Y
+            sudo cp $sysconf/mkinitcpio.conf /etc/mkinitcpio.conf
+            sudo mkinitcpio -P
+        end
+    end
+
+    # locale
+    for f in locale.conf vconsole.conf
+        if test -f $sysconf/$f
+            echo "  Copying $f"
+            sudo cp $sysconf/$f /etc/$f
+        end
+    end
+
+    # limine bootloader
+    if test -f $sysconf/limine.conf
+        log_warn "Will overwrite /boot/limine.conf"
+        read -P "Apply limine.conf? [y/N] " confirm
+        if test "$confirm" = y -o "$confirm" = Y
+            sudo cp $sysconf/limine.conf /boot/limine.conf
+        end
+    end
+
+    # UFW rules
+    if test -d $sysconf/ufw
+        log_warn "Will overwrite /etc/ufw/ rules"
+        read -P "Apply UFW rules? [y/N] " confirm
+        if test "$confirm" = y -o "$confirm" = Y
+            sudo cp $sysconf/ufw/*.rules /etc/ufw/
+            sudo ufw reload
+        end
+    end
+
+    log_step "System configs applied."
+end
+
+# ─── Step 10: Post-install reminders ───
 function step_post_install
     log_step "Post-install checklist:"
     echo "  1. Log in to 1Password:  1password --setup"
@@ -207,8 +274,10 @@ function main
     echo "  4. Enable user services"
     echo "  5. Install uv tools"
     echo "  6. Apply chezmoi dotfiles"
-    echo "  7. Set default shell to fish"
-    echo "  8. Post-install checklist"
+    echo "  7. Set hostname (polaris-1)"
+    echo "  8. Set default shell to fish"
+    echo "  9. Apply system configs"
+    echo "  10. Post-install checklist"
     echo ""
     read -P "Run all steps? [y/N] or enter step number: " choice
 
@@ -220,7 +289,9 @@ function main
             step_enable_user_services
             step_install_uv_tools
             step_apply_chezmoi
+            step_set_hostname
             step_set_fish_shell
+            step_apply_system_configs
             step_post_install
         case 1; step_install_native
         case 2; step_install_aur
@@ -228,10 +299,12 @@ function main
         case 4; step_enable_user_services
         case 5; step_install_uv_tools
         case 6; step_apply_chezmoi
-        case 7; step_set_fish_shell
-        case 8; step_post_install
+        case 7; step_set_hostname
+        case 8; step_set_fish_shell
+        case 9; step_apply_system_configs
+        case 10; step_post_install
         case '*'
-            log_warn "Invalid choice. Run with a step number (1-8) or 'y' for all."
+            log_warn "Invalid choice. Run with a step number (1-10) or 'y' for all."
     end
 end
 
