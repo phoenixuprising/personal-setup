@@ -1,0 +1,60 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "agent",
+            "prompt": "The Write tool just ran. The input was: $ARGUMENTS\n\nExtract the file_path from tool_input. If the file_path ends in .fish AND its directory path contains fish/functions, then:\n1. Read the .fish file\n2. Write a markdown documentation file at the same path but with .md extension (e.g. claude.fish → claude.md)\n\nThe markdown file should cover:\n- What the function does (1-2 sentence summary)\n- Usage with synopsis (e.g. `function-name [args]`)\n- Arguments/flags if any\n- Behavior details (e.g. what it checks, what it launches)\n- Any relevant notes or caveats\n\nIf the file is NOT a fish function file, do nothing and exit."
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/phoenix/.claude/hooks/sudo-output-injector.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": true,
+    "skill-creator@claude-plugins-official": true,
+    "claude-code-setup@claude-plugins-official": true,
+    "frontend-design@claude-plugins-official": true,
+    "context7@claude-plugins-official": false,
+    "github@claude-plugins-official": true,
+    "code-simplifier@claude-plugins-official": true,
+    "feature-dev@claude-plugins-official": true,
+    "ralph-loop@claude-plugins-official": true,
+    "commit-commands@claude-plugins-official": true,
+    "claude-md-management@claude-plugins-official": true,
+    "pr-review-toolkit@claude-plugins-official": true,
+    "explanatory-output-style@claude-plugins-official": true,
+    "hookify@claude-plugins-official": true,
+    "rust-analyzer-lsp@claude-plugins-official": true,
+    "kotlin-lsp@claude-plugins-official": true,
+    "lua-lsp@claude-plugins-official": true,
+    "ruby-lsp@claude-plugins-official": true,
+    "pyright-lsp@claude-plugins-official": true,
+    "forgetful-plugin@forgetful-plugins": true,
+    "serena@claude-plugins-official": true,
+    "clangd-lsp@claude-plugins-official": true
+  },
+  "extraKnownMarketplaces": {
+    "forgetful-plugins": {
+      "source": {
+        "source": "github",
+        "repo": "ScottRBK/forgetful-plugin"
+      }
+    }
+  },
+  "effortLevel": "high",
+  "model": "opus"
+}

@@ -1,0 +1,10 @@
+[gpg]
+	format = ssh
+[gpg "ssh"]
+	program = /opt/1Password/op-ssh-sign
+[commit]
+	gpgsign = true
+[user]
+	signingkey = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAnEj/D24OzKLBphN6+I9Gd01ezMa6vVDKQrjOgBHVp0
+	email = me@chayes.cloud
+	name = CLH - Phoenix

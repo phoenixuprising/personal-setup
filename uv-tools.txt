@@ -1,0 +1,5 @@
+forgetful-ai v0.2.5
+- forgetful
+- forgetful-ai
+jcodemunch-mcp v1.8.3
+- jcodemunch-mcp
