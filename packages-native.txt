@@ -57,7 +57,6 @@ duf
 e2fsprogs
 efibootmgr
 efitools
-egl-wayland
 ethtool
 exfatprogs
 f2fs-tools
@@ -93,8 +92,6 @@ hplip
 hwdetect
 hwinfo
 inetutils
-intel-media-driver
-intel-ucode
 iptables-nft
 iwd
 jfsutils
@@ -102,14 +99,10 @@ kalk
 kitty
 lazygit
 less
-lib32-nvidia-utils
-lib32-opencl-nvidia
 lib32-vulkan-icd-loader
-lib32-vulkan-intel
 libdvdcss
 libgsf
 libopenraw
-libva-nvidia-driver
 lightdm
 lightdm-slick-greeter
 limine
@@ -119,8 +112,6 @@ linux-cachyos
 linux-cachyos-headers
 linux-cachyos-lts
 linux-cachyos-lts-headers
-linux-cachyos-lts-nvidia-open
-linux-cachyos-nvidia-open
 linux-firmware
 logrotate
 lsb-release
@@ -148,12 +139,8 @@ noto-fonts
 noto-fonts-cjk
 noto-fonts-emoji
 nss-mdns
-nvidia-prime
-nvidia-settings
-nvidia-utils
 octopi
 openai-codex
-opencl-nvidia
 openssh
 os-prober
 pacman-contrib
@@ -192,7 +179,6 @@ spotify-player
 spotifyd
 steam
 sudo
-supergfxctl
 switcheroo-control
 sysfsutils
 system-config-printer
@@ -218,9 +204,7 @@ uv
 ventoy-bin
 vim
 vlc-plugins-all
-vpl-gpu-rt
 vulkan-icd-loader
-vulkan-intel
 weston
 wget
 which
