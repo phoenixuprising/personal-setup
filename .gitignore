@@ -3,3 +3,6 @@ hardware-info.toml
 
 secrets/
 __pycache__/
+media-transcribe*.log
+media-transcribe*.txt
+media-transcribe*.wav
