@@ -1,6 +1,6 @@
 1password
 1password-cli
-chezmoi-git
+chezmoi
 google-chrome
 kdeconnect-git
 nb
