@@ -10,10 +10,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import traceback
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 from urllib.parse import urlparse
 
 from loguru import logger
@@ -245,6 +246,7 @@ def live_transcribe_audio(
     chunk_size = bytes_per_second * chunk_seconds
     pending = bytearray()
     chunk_index = 0
+    stop_requested = threading.Event()
 
     cmd = [
         "parec",
@@ -265,6 +267,8 @@ def live_transcribe_audio(
 
     class CaptureApp(App[None]):
         """Simple Textual app to display live capture status and transcript output."""
+
+        BINDINGS = [("ctrl+q", "quit_capture", "Quit")]
 
         CSS = """
         Screen {
@@ -324,7 +328,23 @@ def live_transcribe_audio(
             self.transcript_text = transcript
             self.query_one("#transcript", Static).update(self.transcript_text or "Waiting for transcription...")
 
+        def action_quit_capture(self) -> None:
+            nonlocal status_message
+            status_message = "Stopping live transcription"
+            stop_requested.set()
+            if process.poll() is None:
+                process.terminate()
+            self.update_status()
+            self.exit()
+
     app = CaptureApp()
+
+    def safe_ui_update(callback: Callable[[], None]) -> None:
+        """Attempt a thread-safe UI update, ignoring late calls after app shutdown."""
+        try:
+            app.call_from_thread(callback)
+        except RuntimeError:
+            pass
 
     def transcribe_chunk(pcm_data: bytes) -> None:
         nonlocal chunk_index, transcript_line_count, status_message
@@ -333,7 +353,7 @@ def live_transcribe_audio(
 
         chunk_index += 1
         status_message = f"Transcribing chunk {chunk_index}"
-        app.call_from_thread(app.update_status)
+        safe_ui_update(app.update_status)
         audio = np.frombuffer(pcm_data, dtype=np.int16).astype(np.float32) / 32768.0
         segments, _ = model.transcribe(
             audio,
@@ -344,7 +364,7 @@ def live_transcribe_audio(
         lines = [segment.text.strip() for segment in segments if segment.text.strip()]
         if not lines:
             status_message = f"Chunk {chunk_index} produced no transcript"
-            app.call_from_thread(app.update_status)
+            safe_ui_update(app.update_status)
             return
 
         with transcript_path.open("a") as transcript_file:
@@ -355,34 +375,35 @@ def live_transcribe_audio(
         transcript_lines.extend(lines)
         transcript_line_count += len(lines)
         status_message = f"Chunk {chunk_index} appended to {transcript_path.name}"
-        app.call_from_thread(app.update_status)
-        app.call_from_thread(app.update_transcript)
+        safe_ui_update(app.update_status)
+        safe_ui_update(app.update_transcript)
 
     def worker() -> None:
         nonlocal total_bytes_recorded, status_message
         try:
             assert process.stdout is not None
             while True:
+                if stop_requested.is_set():
+                    break
                 data = process.stdout.read(4096)
                 if not data:
                     break
                 total_bytes_recorded += len(data)
                 pending.extend(data)
-                app.call_from_thread(app.update_status)
+                safe_ui_update(app.update_status)
                 while len(pending) >= chunk_size:
                     chunk = bytes(pending[:chunk_size])
                     del pending[:chunk_size]
                     transcribe_chunk(chunk)
         finally:
-            if pending:
+            if pending and not stop_requested.is_set():
                 transcribe_chunk(bytes(pending))
             status_message = "Stopping capture"
-            app.call_from_thread(app.update_status)
-            process.terminate()
+            safe_ui_update(app.update_status)
+            if process.poll() is None:
+                process.terminate()
             process.wait(timeout=5)
-            app.call_from_thread(app.exit)
-
-    import threading
+            safe_ui_update(app.exit)
 
     worker_thread = threading.Thread(target=worker, daemon=True)
     worker_thread.start()
