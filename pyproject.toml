@@ -5,8 +5,10 @@ description = "Media download, extraction, and transcription helpers"
 requires-python = ">=3.11"
 dependencies = [
     "av",
+    "faster-whisper",
     "loguru",
     "openai-whisper",
+    "textual",
     "torch>=2.9.1",
     "torchvision>=0.24.1",
     "yt-dlp",
@@ -22,11 +24,11 @@ build-backend = "hatchling.build"
 [tool.uv.sources]
 torch = [
     { index = "pytorch-cpu", marker = "sys_platform != 'linux'" },
-    { index = "pytorch-cu130", marker = "sys_platform == 'linux'" },
+    { index = "pytorch-cu126", marker = "sys_platform == 'linux'" },
 ]
 torchvision = [
     { index = "pytorch-cpu", marker = "sys_platform != 'linux'" },
-    { index = "pytorch-cu130", marker = "sys_platform == 'linux'" },
+    { index = "pytorch-cu126", marker = "sys_platform == 'linux'" },
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -38,6 +40,6 @@ url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
 [[tool.uv.index]]
-name = "pytorch-cu130"
-url = "https://download.pytorch.org/whl/cu130"
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
 explicit = true
