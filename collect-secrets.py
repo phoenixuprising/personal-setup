@@ -135,32 +135,52 @@ def collect_all():
     return collected
 
 
-def encrypt_secrets():
-    """Tar and encrypt secrets/ → secrets.age, store key in 1Password."""
-    # Generate fresh age keypair
+def _get_or_create_key():
+    """Retrieve existing age key from 1Password, or generate and store a new one.
+
+    Returns (identity, recipient) tuple.
+    """
+    # Try to retrieve existing key
     result = subprocess.run(
-        ["age-keygen"],
-        capture_output=True, text=True,
+        ["op", "item", "get", OP_ITEM_TITLE, "--fields", "password", "--reveal"],
+        capture_output=True, text=True, timeout=10,
     )
-    if result.returncode != 0:
-        log_error("Failed to generate age keypair.")
-        sys.exit(1)
+    if result.returncode == 0 and result.stdout.strip().startswith("AGE-SECRET-KEY-"):
+        identity = result.stdout.strip()
+        log_step("Using existing age key from 1Password.")
+    else:
+        # Generate new keypair
+        result = subprocess.run(["age-keygen"], capture_output=True, text=True)
+        if result.returncode != 0:
+            log_error("Failed to generate age keypair.")
+            sys.exit(1)
+        identity = None
+        for line in result.stdout.splitlines():
+            if line.startswith("AGE-SECRET-KEY-"):
+                identity = line.strip()
+                break
+        if not identity:
+            log_error("Failed to parse age keypair output.")
+            sys.exit(1)
+        _store_identity_in_1password(identity)
+        log_step("Generated new age key and stored in 1Password.")
 
-    # Parse identity (secret key line from stdout) and recipient (from stderr)
-    identity = None
-    for line in result.stdout.splitlines():
-        if line.startswith("AGE-SECRET-KEY-"):
-            identity = line.strip()
-            break
-    recipient = None
-    for line in result.stderr.splitlines():
-        if line.startswith("Public key:"):
-            recipient = line.split(":", 1)[1].strip()
-            break
-
-    if not identity or not recipient:
-        log_error("Failed to parse age keypair output.")
+    # Derive recipient (public key) from identity
+    result = subprocess.run(
+        ["age-keygen", "-y"],
+        input=identity, capture_output=True, text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        log_error("Failed to derive public key from age identity.")
         sys.exit(1)
+    recipient = result.stdout.strip()
+
+    return identity, recipient
+
+
+def encrypt_secrets():
+    """Tar and encrypt secrets/ → secrets.age using key from 1Password."""
+    identity, recipient = _get_or_create_key()
 
     # Create tarball of secrets/
     with tempfile.NamedTemporaryFile(suffix=".tar", delete=False) as tmp:
@@ -182,9 +202,6 @@ def encrypt_secrets():
         log_step(f"Encrypted → {ENCRYPTED_FILE.relative_to(SCRIPT_DIR)}")
     finally:
         tarball_path.unlink(missing_ok=True)
-
-    # Store identity in 1Password
-    _store_identity_in_1password(identity)
 
     # Clean up plaintext secrets/
     shutil.rmtree(SECRETS_DIR)
@@ -220,6 +237,26 @@ def _store_identity_in_1password(identity):
         log_step(f"Created 1Password item: {OP_ITEM_TITLE}")
 
 
+def commit_secrets():
+    """Stage and commit secrets.age."""
+    subprocess.run(
+        ["git", "add", str(ENCRYPTED_FILE)],
+        cwd=SCRIPT_DIR, check=True,
+    )
+    result = subprocess.run(
+        ["git", "diff", "--cached", "--quiet", str(ENCRYPTED_FILE)],
+        cwd=SCRIPT_DIR,
+    )
+    if result.returncode == 0:
+        log_step("secrets.age unchanged — nothing to commit.")
+        return
+    subprocess.run(
+        ["git", "commit", "-m", "updated secrets."],
+        cwd=SCRIPT_DIR, check=True,
+    )
+    log_step("Committed secrets.age.")
+
+
 def main():
     print()
     print("Collecting and encrypting secrets...")
@@ -235,14 +272,10 @@ def main():
         return
 
     encrypt_secrets()
+    commit_secrets()
 
     print()
-    log_step(f"Done — {collected} item(s) encrypted in {ENCRYPTED_FILE.name}")
-    print()
-    print("  Next steps:")
-    print("    1. Commit and push secrets.age to GitHub")
-    print("    2. On the target machine, clone the repo and run: python3 setup.py")
-    print("    3. Step 6 will decrypt and install secrets (requires 1Password sign-in)")
+    log_step(f"Done — {collected} item(s) encrypted and committed.")
     print()
 
 

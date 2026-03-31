@@ -315,9 +315,8 @@ def step_install_secrets():
     if op_accounts.exists():
         print("  1Password accounts available — sign in with: 1password --setup")
 
-    # Wallpapers — now from userdata/ instead of secrets/
-    userdata_dir = SCRIPT_DIR / "userdata"
-    wallpapers_src = userdata_dir / "wallpapers"
+    # Wallpapers — from userdata/
+    wallpapers_src = SCRIPT_DIR / "userdata" / "wallpapers"
     if wallpapers_src.is_dir():
         wallpapers_dest = home / "Pictures" / "Wallpapers"
         wallpapers_dest.mkdir(parents=True, exist_ok=True)
