@@ -13,6 +13,8 @@ import os
 import shutil
 import subprocess
 import sys
+import tarfile
+import tempfile
 import tomllib
 from pathlib import Path
 
@@ -204,12 +206,76 @@ def _install_secret(src, dest, label, mode=0o600):
     log_step(f"{label} installed.")
 
 
+ENCRYPTED_FILE = SCRIPT_DIR / "secrets.age"
+OP_ITEM_TITLE = "system-ai Secrets Key"
+
+
+def _decrypt_secrets():
+    """Decrypt secrets.age → secrets/ using identity from 1Password."""
+    if not shutil.which("age"):
+        log_error("age not found — install with: pacman -S age")
+        return False
+    if not shutil.which("op"):
+        log_error("1Password CLI (op) not found.")
+        return False
+
+    # Retrieve identity from 1Password
+    result = subprocess.run(
+        ["op", "item", "get", OP_ITEM_TITLE, "--fields", "password", "--reveal"],
+        capture_output=True, text=True, timeout=10,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        log_error(f"Could not retrieve '{OP_ITEM_TITLE}' from 1Password. Are you signed in?")
+        return False
+
+    identity = result.stdout.strip()
+
+    # Write identity to temp file for age -d -i
+    tmp_identity = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".key", delete=False) as f:
+            f.write(identity + "\n")
+            tmp_identity = Path(f.name)
+        tmp_identity.chmod(0o600)
+
+        # Decrypt to a temp tarball, then extract
+        with tempfile.NamedTemporaryFile(suffix=".tar", delete=False) as tmp_tar:
+            tmp_tar_path = Path(tmp_tar.name)
+
+        result = subprocess.run(
+            ["age", "-d", "-i", str(tmp_identity), "-o", str(tmp_tar_path), str(ENCRYPTED_FILE)],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            log_error(f"age decryption failed: {result.stderr}")
+            tmp_tar_path.unlink(missing_ok=True)
+            return False
+
+        with tarfile.open(tmp_tar_path) as tar:
+            tar.extractall(path=SCRIPT_DIR)
+        tmp_tar_path.unlink(missing_ok=True)
+
+        log_step("Decrypted secrets.age → secrets/")
+        return True
+    finally:
+        if tmp_identity:
+            tmp_identity.unlink(missing_ok=True)
+
+
 def step_install_secrets():
     log_step("Installing secrets...")
     secrets_dir = SCRIPT_DIR / "secrets"
+    decrypted = False
+
+    # Decrypt if needed
     if not secrets_dir.is_dir():
-        log_warn("No secrets/ directory found — run collect-secrets.py on the source machine first.")
-        return
+        if ENCRYPTED_FILE.exists():
+            decrypted = _decrypt_secrets()
+            if not decrypted:
+                return
+        else:
+            log_warn("No secrets/ directory or secrets.age found — run collect-secrets.py on the source machine first.")
+            return
 
     home = Path.home()
 
@@ -249,8 +315,9 @@ def step_install_secrets():
     if op_accounts.exists():
         print("  1Password accounts available — sign in with: 1password --setup")
 
-    # Wallpapers
-    wallpapers_src = secrets_dir / "wallpapers"
+    # Wallpapers — now from userdata/ instead of secrets/
+    userdata_dir = SCRIPT_DIR / "userdata"
+    wallpapers_src = userdata_dir / "wallpapers"
     if wallpapers_src.is_dir():
         wallpapers_dest = home / "Pictures" / "Wallpapers"
         wallpapers_dest.mkdir(parents=True, exist_ok=True)
@@ -263,10 +330,15 @@ def step_install_secrets():
         if count:
             log_step(f"Installed {count} wallpaper(s) to {wallpapers_dest}")
     else:
-        log_warn("No wallpapers/ in secrets — skipping wallpaper install.")
+        log_warn("No userdata/wallpapers/ found — skipping wallpaper install.")
 
     # Configure sshd for pubkey-only access
     _configure_sshd()
+
+    # Clean up decrypted secrets
+    if decrypted:
+        shutil.rmtree(secrets_dir)
+        log_step("Cleaned up decrypted secrets/ directory.")
 
     log_step("Secrets installed.")
 
