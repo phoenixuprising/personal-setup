@@ -68,7 +68,7 @@ After setup.py finishes, handle these manually:
 
 1. **1Password:** `1password --setup` — sign in to unlock SSH agent + git signing.
 2. **Browsers:** Sign in to Firefox / Chrome / Floorp and sync.
-3. **Spotify:** Sign in to spotifyd + spotify-player.
+3. **Spotify:** Start the `spotifyd` user service and sign in with `spotify-player`.
 4. **Signal:** Sign in to Signal Desktop.
 5. **KDE Connect:** Pair with your phone.
 6. **Snapper:** `sudo snapper -c root create-config /`

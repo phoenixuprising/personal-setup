@@ -520,7 +520,7 @@ def step_post_install():
     checklist = """\
   1.  Log in to 1Password:  1password --setup
   2.  Log in to Firefox / Chrome / Floorp and sync
-  3.  Log in to Spotify (spotifyd + spotify-player)
+  3.  Start spotifyd and log in with spotify-player
   4.  Log in to Signal Desktop
   5.  Set up SSH keys (check ~/.ssh/config applied by chezmoi)
   6.  Configure KDE Connect on phone
