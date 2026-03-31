@@ -1,4 +1,5 @@
 accountsservice
+age
 alacritty
 alsa-firmware
 alsa-plugins
