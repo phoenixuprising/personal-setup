@@ -81,7 +81,10 @@ def collect_file(src, dest_name, mode=0o600, dest_subdir=None):
 
 def collect_all():
     """Gather all secrets into the secrets/ directory. Returns item count."""
-    SECRETS_DIR.mkdir(exist_ok=True)
+    # Clean any stale files from a previous run
+    if SECRETS_DIR.exists():
+        shutil.rmtree(SECRETS_DIR)
+    SECRETS_DIR.mkdir()
     collected = 0
 
     # ─── Claude Code credentials ───
