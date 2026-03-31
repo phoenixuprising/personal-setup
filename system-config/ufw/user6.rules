@@ -16,6 +16,8 @@
 :ufw6-user-limit - [0:0]
 :ufw6-user-limit-accept - [0:0]
 ### RULES ###
+-A ufw6-user-input -p tcp -m multiport --dports 1714:1764 -j ACCEPT
+-A ufw6-user-input -p udp -m multiport --dports 1714:1764 -j ACCEPT
 
 ### END RULES ###
 
