@@ -5,6 +5,7 @@ avahi-daemon.service
 bluetooth.service
 cups.service
 getty@.service
+libvirtd.service
 limine-snapper-sync.service
 NetworkManager-dispatcher.service
 NetworkManager-wait-online.service

@@ -3,3 +3,5 @@ hardware-info.toml
 
 secrets/
 __pycache__/
+test-vm/*.qcow2
+test-vm/*_VARS.fd

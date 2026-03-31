@@ -55,6 +55,7 @@ dmraid
 dnsmasq
 dosfstools
 duf
+edk2-ovmf
 e2fsprogs
 efibootmgr
 efitools
@@ -104,6 +105,7 @@ lib32-vulkan-icd-loader
 libdvdcss
 libgsf
 libopenraw
+libvirt
 lightdm
 lightdm-slick-greeter
 limine
@@ -131,6 +133,7 @@ nano
 nano-syntax-highlighting
 ncdu
 neovim
+npm
 netctl
 networkmanager
 networkmanager-openvpn
@@ -163,6 +166,7 @@ python-packaging
 python-pyqt5
 python-reportlab
 python-yaml
+qemu-full
 rebuild-detector
 reflector
 ripgrep
@@ -204,6 +208,7 @@ usbutils
 uv
 ventoy-bin
 vim
+virt-manager
 vlc-plugins-all
 vulkan-icd-loader
 weston
