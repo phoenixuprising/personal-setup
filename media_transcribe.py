@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import traceback
 from pathlib import Path
 from typing import Any, Literal
@@ -49,7 +50,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Wrap yt-dlp, ffmpeg, and whisper into one transcription workflow."
     )
-    parser.add_argument("source", help="Media file path or URL to download and transcribe.")
+    parser.add_argument(
+        "source",
+        nargs="?",
+        help="Media file path or URL to download and transcribe. Omit to record from a local audio source.",
+    )
     parser.add_argument(
         "--output-dir",
         type=Path,
@@ -103,6 +108,38 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable debug logging.",
     )
+    parser.add_argument(
+        "--capture",
+        action="store_true",
+        help="Record local audio interactively and stop with Ctrl+C.",
+    )
+    parser.add_argument(
+        "--capture-source",
+        default="@DEFAULT_MONITOR@",
+        help="PulseAudio/PipeWire source name to record from. Default: @DEFAULT_MONITOR@",
+    )
+    parser.add_argument(
+        "--create-virtual-sink",
+        action="store_true",
+        help="Create a temporary virtual output sink and record from its monitor source.",
+    )
+    parser.add_argument(
+        "--virtual-sink-name",
+        default="media-transcribe",
+        help="Name for the temporary virtual sink. Default: media-transcribe",
+    )
+    parser.add_argument(
+        "--chunk-seconds",
+        type=int,
+        default=4,
+        help="Chunk size in seconds for live transcription. Default: 4",
+    )
+    parser.add_argument(
+        "--compute-type",
+        default="auto",
+        choices=("auto", "float16", "float32", "int8"),
+        help="faster-whisper compute type for live capture. Default: auto",
+    )
     return parser
 
 
@@ -135,6 +172,285 @@ def run_command(args: list[str], capture_stdout: bool = False) -> str | None:
         return result.stdout.strip()
     logger.debug("Command completed")
     return None
+
+
+def record_audio(source_name: str, output_path: Path) -> Path:
+    """Record audio from a PulseAudio/PipeWire source into a WAV file until interrupted."""
+    ensure_command("parec")
+    logger.info("Recording from {}. Press Ctrl+C to stop.", source_name)
+    cmd = [
+        "parec",
+        "--device",
+        source_name,
+        "--file-format=wav",
+        str(output_path),
+    ]
+    process = subprocess.Popen(cmd)
+    try:
+        process.wait()
+    except KeyboardInterrupt:
+        logger.info("Stopping recording")
+        process.terminate()
+        process.wait(timeout=5)
+        print("", file=sys.stderr)
+
+    if process.returncode not in {0, -15}:
+        raise subprocess.CalledProcessError(process.returncode or 1, cmd)
+
+    if not output_path.exists():
+        raise SystemExit(f"Recording did not create an output file: {output_path}")
+    logger.info("Recorded audio to {}", output_path)
+    return output_path
+
+
+def live_transcribe_audio(
+    source_name: str,
+    transcript_path: Path,
+    model_name: str,
+    device: WhisperDevice,
+    language: str | None,
+    chunk_seconds: int = 4,
+    sample_rate: int = 16_000,
+    channels: int = 1,
+    compute_type: str = "auto",
+) -> Path:
+    """Record PCM audio from a local source and transcribe rolling chunks with faster-whisper."""
+    try:
+        from faster_whisper import WhisperModel
+        import numpy as np
+    except ImportError as exc:
+        raise SystemExit(
+            "The Python faster-whisper and numpy packages are not installed in the active environment. Run `uv sync`."
+        ) from exc
+
+    try:
+        from textual.app import App, ComposeResult
+        from textual.containers import Vertical
+        from textual.reactive import reactive
+        from textual.widgets import Footer, Header, Static
+    except ImportError as exc:
+        raise SystemExit("The Python textual package is not installed in the active environment. Run `uv sync`.") from exc
+
+    ensure_command("parec")
+    transcript_path.parent.mkdir(parents=True, exist_ok=True)
+    transcript_path.write_text("")
+
+    resolved_compute_type = compute_type if compute_type != "auto" else ("float16" if device == "cuda" else "int8")
+    model = WhisperModel(
+        model_name,
+        device="cuda" if device == "cuda" else "cpu",
+        compute_type=resolved_compute_type,
+    )
+    bytes_per_second = sample_rate * channels * 2
+    chunk_size = bytes_per_second * chunk_seconds
+    pending = bytearray()
+    chunk_index = 0
+
+    cmd = [
+        "parec",
+        "--device",
+        source_name,
+        "--raw",
+        f"--rate={sample_rate}",
+        "--format=s16le",
+        f"--channels={channels}",
+    ]
+    logger.info("Streaming local audio from {}. Press Ctrl+C to stop.", source_name)
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    started_at = time.monotonic()
+    total_bytes_recorded = 0
+    transcript_line_count = 0
+    status_message = "Recording live audio. Press Ctrl+C to stop."
+    transcript_lines: list[str] = []
+
+    class CaptureApp(App[None]):
+        """Simple Textual app to display live capture status and transcript output."""
+
+        CSS = """
+        Screen {
+            layout: vertical;
+        }
+
+        #status {
+            height: 10;
+            padding: 0 1;
+            border: round $accent;
+        }
+
+        #transcript {
+            height: 1fr;
+            padding: 0 1;
+            border: round $success;
+        }
+        """
+
+        status_text = reactive("")
+        transcript_text = reactive("")
+
+        def compose(self) -> ComposeResult:
+            yield Header(show_clock=True)
+            with Vertical():
+                yield Static(id="status")
+                yield Static(id="transcript")
+            yield Footer()
+
+        def on_mount(self) -> None:
+            self.update_status()
+            self.update_transcript()
+
+        def update_status(self) -> None:
+            elapsed = int(time.monotonic() - started_at)
+            minutes, seconds = divmod(elapsed, 60)
+            recorded_seconds = total_bytes_recorded / bytes_per_second if bytes_per_second else 0
+            self.status_text = "\n".join(
+                [
+                    f"Source: {source_name}",
+                    f"Model: {model_name}",
+                    f"Device: {device}",
+                    f"Compute type: {resolved_compute_type}",
+                    f"Transcript: {transcript_path}",
+                    f"Elapsed: {minutes:02d}:{seconds:02d}",
+                    f"Chunks processed: {chunk_index}",
+                    f"Transcript lines: {transcript_line_count}",
+                    f"Buffered audio: {len(pending) / bytes_per_second:.1f}s",
+                    f"Recorded audio: {recorded_seconds:.1f}s",
+                    f"Status: {status_message}",
+                ]
+            )
+            self.query_one("#status", Static).update(self.status_text)
+
+        def update_transcript(self) -> None:
+            transcript = "\n".join(transcript_lines[-30:]).strip()
+            self.transcript_text = transcript
+            self.query_one("#transcript", Static).update(self.transcript_text or "Waiting for transcription...")
+
+    app = CaptureApp()
+
+    def transcribe_chunk(pcm_data: bytes) -> None:
+        nonlocal chunk_index, transcript_line_count, status_message
+        if not pcm_data.strip(b"\x00"):
+            return
+
+        chunk_index += 1
+        status_message = f"Transcribing chunk {chunk_index}"
+        app.call_from_thread(app.update_status)
+        audio = np.frombuffer(pcm_data, dtype=np.int16).astype(np.float32) / 32768.0
+        segments, _ = model.transcribe(
+            audio,
+            language=language,
+            vad_filter=True,
+            beam_size=5,
+        )
+        lines = [segment.text.strip() for segment in segments if segment.text.strip()]
+        if not lines:
+            status_message = f"Chunk {chunk_index} produced no transcript"
+            app.call_from_thread(app.update_status)
+            return
+
+        with transcript_path.open("a") as transcript_file:
+            if transcript_file.tell() > 0:
+                transcript_file.write("\n")
+            transcript_file.write("\n".join(lines))
+            transcript_file.write("\n")
+        transcript_lines.extend(lines)
+        transcript_line_count += len(lines)
+        status_message = f"Chunk {chunk_index} appended to {transcript_path.name}"
+        app.call_from_thread(app.update_status)
+        app.call_from_thread(app.update_transcript)
+
+    def worker() -> None:
+        nonlocal total_bytes_recorded, status_message
+        try:
+            assert process.stdout is not None
+            while True:
+                data = process.stdout.read(4096)
+                if not data:
+                    break
+                total_bytes_recorded += len(data)
+                pending.extend(data)
+                app.call_from_thread(app.update_status)
+                while len(pending) >= chunk_size:
+                    chunk = bytes(pending[:chunk_size])
+                    del pending[:chunk_size]
+                    transcribe_chunk(chunk)
+        finally:
+            if pending:
+                transcribe_chunk(bytes(pending))
+            status_message = "Stopping capture"
+            app.call_from_thread(app.update_status)
+            process.terminate()
+            process.wait(timeout=5)
+            app.call_from_thread(app.exit)
+
+    import threading
+
+    worker_thread = threading.Thread(target=worker, daemon=True)
+    worker_thread.start()
+    try:
+        app.run()
+    except KeyboardInterrupt:
+        status_message = "Stopping live transcription"
+        process.terminate()
+        print("", file=sys.stderr)
+    worker_thread.join()
+
+    logger.info("Transcript written to {}", transcript_path)
+    return transcript_path
+
+
+def get_default_sink() -> str:
+    """Return the current default PulseAudio/PipeWire sink name."""
+    ensure_command("pactl")
+    default_sink = run_command(["pactl", "get-default-sink"], capture_stdout=True)
+    if not default_sink:
+        raise SystemExit("Failed to determine the default sink with pactl.")
+    return default_sink
+
+
+def create_virtual_sink(sink_name: str) -> tuple[list[str], str, str]:
+    """Create a temporary null sink, mirror it to the current default sink, and return module ids."""
+    ensure_command("pactl")
+    sink_name = console_friendly_name(sink_name).lower()
+    mirrored_sink = get_default_sink()
+    module_ids: list[str] = []
+    sink_module_id = run_command(
+        [
+            "pactl",
+            "load-module",
+            "module-null-sink",
+            f"sink_name={sink_name}",
+            f"sink_properties=device.description={sink_name}",
+        ],
+        capture_stdout=True,
+    )
+    if not sink_module_id:
+        raise SystemExit("Failed to create virtual sink with pactl.")
+    module_ids.append(sink_module_id)
+    monitor_source = f"{sink_name}.monitor"
+    loopback_module_id = run_command(
+        [
+            "pactl",
+            "load-module",
+            "module-loopback",
+            f"source={monitor_source}",
+            f"sink={mirrored_sink}",
+            "latency_msec=50",
+        ],
+        capture_stdout=True,
+    )
+    if loopback_module_id:
+        module_ids.append(loopback_module_id)
+    logger.info("Created virtual sink {} with monitor {}", sink_name, monitor_source)
+    logger.info("Mirroring virtual sink {} to {}", sink_name, mirrored_sink)
+    return module_ids, monitor_source, mirrored_sink
+
+
+def unload_virtual_sink(module_ids: list[str]) -> None:
+    """Unload previously created PulseAudio/PipeWire modules."""
+    ensure_command("pactl")
+    for module_id in reversed(module_ids):
+        run_command(["pactl", "unload-module", module_id])
+        logger.info("Removed virtual sink module {}", module_id)
 
 
 def download_source(source: str, output_dir: Path) -> Path:
@@ -377,38 +693,74 @@ def main() -> int:
     whisper_device = detect_whisper_device() if args.device == "auto" else args.device
     logger.info("Selected Whisper device: {}", whisper_device)
 
-    source_path = (
-        download_source(args.source, working_dir)
-        if is_url(args.source)
-        else Path(args.source).expanduser().resolve()
-    )
-    if not source_path.exists():
-        raise SystemExit(f"Source file does not exist: {source_path}")
-    logger.info("Using source {}", source_path)
+    if args.source is None and not args.capture:
+        raise SystemExit("Provide a source path/URL or use --capture for local audio capture.")
 
-    audio_path = extract_audio(source_path, working_dir, args.audio_format)
-    transcript_path = transcribe_audio(
-        audio_path=audio_path,
-        output_dir=transcript_dir,
-        model=args.model,
-        language=args.language,
-        output_format=args.output_format,
-        device=whisper_device,
-    )
+    virtual_sink_module_ids: list[str] | None = None
+    try:
+        if args.capture:
+            capture_source = args.capture_source
+            mirrored_sink: str | None = None
+            if args.create_virtual_sink:
+                virtual_sink_module_ids, capture_source, mirrored_sink = create_virtual_sink(args.virtual_sink_name)
+                logger.info(
+                    "Route application audio to output sink '{}' while recording from '{}'",
+                    console_friendly_name(args.virtual_sink_name).lower(),
+                    capture_source,
+                )
+                if mirrored_sink is not None:
+                    logger.info("Virtual sink audio is also mirrored to '{}'", mirrored_sink)
+            transcript_path = transcript_dir / f"{console_friendly_name(args.virtual_sink_name)}.txt"
+            live_transcribe_audio(
+                capture_source,
+                transcript_path,
+                args.model,
+                whisper_device,
+                args.language,
+                chunk_seconds=args.chunk_seconds,
+                compute_type=args.compute_type,
+            )
+            return 0
+        else:
+            assert args.source is not None
+            source_path = (
+                download_source(args.source, working_dir)
+                if is_url(args.source)
+                else Path(args.source).expanduser().resolve()
+            )
+        if not source_path.exists():
+            raise SystemExit(f"Source file does not exist: {source_path}")
+        logger.info("Using source {}", source_path)
 
-    if args.output_format == "txt" and not args.no_clean:
-        maybe_clean_transcript(transcript_path)
+        audio_path = extract_audio(source_path, working_dir, args.audio_format)
+        transcript_path = transcribe_audio(
+            audio_path=audio_path,
+            output_dir=transcript_dir,
+            model=args.model,
+            language=args.language,
+            output_format=args.output_format,
+            device=whisper_device,
+        )
 
-    if is_url(args.source) and not args.keep_video:
-        logger.debug("Removing downloaded source file {}", source_path)
-        source_path.unlink(missing_ok=True)
+        if args.output_format == "txt" and not args.no_clean:
+            maybe_clean_transcript(transcript_path)
 
-    if not args.keep_audio:
-        logger.debug("Removing extracted audio file {}", audio_path)
-        audio_path.unlink(missing_ok=True)
+        if args.source is not None and is_url(args.source) and not args.keep_video:
+            logger.debug("Removing downloaded source file {}", source_path)
+            source_path.unlink(missing_ok=True)
 
-    logger.info("Transcript written to {}", transcript_path)
-    return 0
+        if not args.keep_audio:
+            logger.debug("Removing extracted audio file {}", audio_path)
+            audio_path.unlink(missing_ok=True)
+
+        logger.info("Transcript written to {}", transcript_path)
+        return 0
+    finally:
+        if virtual_sink_module_ids is not None:
+            try:
+                unload_virtual_sink(virtual_sink_module_ids)
+            except Exception:
+                logger.exception("Failed to unload virtual sink modules {}", virtual_sink_module_ids)
 
 
 def cli() -> int:
