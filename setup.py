@@ -10,6 +10,7 @@ auto-detected from hardware-info.toml. Run probe-hardware.py on the target first
 """
 
 import os
+import argparse
 import shutil
 import subprocess
 import sys
@@ -18,31 +19,63 @@ import tempfile
 import tomllib
 from pathlib import Path
 
+from tool_runtime import ToolRuntime
+
 SCRIPT_DIR = Path(__file__).parent.resolve()
 
 # ─── Colors ──────────────────────────────────────────────────────────────────
 
-GREEN = "\033[32m"
-YELLOW = "\033[33m"
-RED = "\033[31m"
-RESET = "\033[0m"
+ASSUME_YES = False
+JSON_OUTPUT = False
+STEP_RESULTS: list[dict[str, object]] = []
+RUNTIME = ToolRuntime("setup")
 
 
 def log_step(msg):
-    print(f"{GREEN}▶ {msg}{RESET}")
+    RUNTIME.info(msg)
 
 
 def log_warn(msg):
-    print(f"{YELLOW}⚠ {msg}{RESET}")
+    RUNTIME.warn(msg)
 
 
 def log_error(msg):
-    print(f"{RED}✗ {msg}{RESET}")
+    RUNTIME.error(msg)
 
 
 def confirm(prompt):
     """Ask for y/N confirmation."""
+    if ASSUME_YES:
+        print(f"{prompt}y")
+        return True
     return input(prompt).strip().lower() in ("y", "yes")
+
+
+def parse_args():
+    """Parse CLI arguments for non-interactive setup execution."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-y", "--yes",
+        action="store_true",
+        help="assume yes for confirmations and run all steps if no step is specified",
+    )
+    parser.add_argument(
+        "step",
+        nargs="?",
+        help="step number to run, or 'all' to run every step",
+    )
+    parser.add_argument(
+        "--log-format",
+        choices=("text", "json"),
+        default="text",
+        help="Emit human-readable or JSON logs to stderr.",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit a machine-readable run summary to stdout.",
+    )
+    return parser.parse_args()
 
 
 def read_list(filename):
@@ -178,13 +211,32 @@ def step_enable_user_services():
 # ─── Step 5: Install uv tools ───────────────────────────────────────────────
 
 
+def read_uv_tool_specs():
+    """Read uv-tools.txt and return installable package specs."""
+    specs = []
+    for line in read_list("uv-tools.txt"):
+        if line.startswith("-"):
+            continue
+        specs.append(line.split()[0])
+    return specs
+
+
 def step_install_uv_tools():
     log_step("Installing uv tools...")
     if not shutil.which("uv"):
         log_error("uv not found — install it first (should be in native packages).")
         return
-    subprocess.run(["uv", "tool", "install", "forgetful-ai"])
-    subprocess.run(["uv", "tool", "install", "jcodemunch-mcp"])
+    # TODO: Move this inventory to a stricter machine-readable format once Ansible/Terraform consumers appear.
+    for spec in read_uv_tool_specs():
+        subprocess.run(["uv", "tool", "install", spec])
+        RUNTIME.record_event("install-uv-tool", spec=spec)
+
+    command_help_parser_repo = Path.home() / "Developement" / "command-help-parser"
+    if command_help_parser_repo.is_dir():
+        subprocess.run(["uv", "tool", "install", "--editable", str(command_help_parser_repo)])
+        RUNTIME.record_event("install-uv-tool", spec=str(command_help_parser_repo), editable=True)
+    else:
+        log_warn(f"Skipping local uv tool install; repo not found at {command_help_parser_repo}")
     log_step("uv tools installed.")
 
 
@@ -353,6 +405,7 @@ AuthenticationMethods publickey
 
 def _configure_sshd():
     """Install a hardened sshd drop-in and enable the service."""
+    # TODO: Split this into per-platform SSH providers once Debian/macOS support is added.
     dropin_dir = Path("/etc/ssh/sshd_config.d")
     dropin = dropin_dir / "99-personal-setup.conf"
 
@@ -437,6 +490,10 @@ def step_set_hostname():
         ["hostname"], capture_output=True, text=True
     ).stdout.strip()
     print(f"  Current hostname: {current}")
+    if ASSUME_YES:
+        subprocess.run(["sudo", "hostnamectl", "set-hostname", "polaris-1"])
+        log_step("Hostname set to polaris-1.")
+        return
     choice = input("Set hostname to polaris-1? [y/N] or type a different name: ").strip()
 
     if choice.lower() in ("y", "yes"):
@@ -462,6 +519,65 @@ def step_set_fish_shell():
 
 
 # ─── Step 9: Apply system configs ────────────────────────────────────────────
+
+
+def _root_filesystem_type():
+    """Return the filesystem type mounted at /, or None if it cannot be detected."""
+    result = subprocess.run(
+        ["findmnt", "-n", "-o", "FSTYPE", "/"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def _configure_snapper_root():
+    """Create the snapper root config when snapper is installed on a btrfs system."""
+    if not shutil.which("snapper"):
+        log_warn("snapper not found — skipping snapper root configuration.")
+        return
+
+    root_fs = _root_filesystem_type()
+    if root_fs != "btrfs":
+        detected = root_fs or "unknown"
+        log_warn(f"Root filesystem is {detected}, not btrfs — skipping snapper root configuration.")
+        return
+
+    existing = subprocess.run(
+        ["sudo", "snapper", "-c", "root", "list"],
+        capture_output=True, text=True,
+    )
+    if existing.returncode == 0:
+        log_step("Snapper root config already exists.")
+        return
+
+    if not confirm("Create snapper root config for /? [y/N] "):
+        log_warn("Skipped snapper root configuration.")
+        return
+
+    result = subprocess.run(
+        ["sudo", "snapper", "-c", "root", "create-config", "/"],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        log_step("Snapper root config created.")
+    else:
+        stderr = result.stderr.strip() or "unknown error"
+        log_warn(f"Snapper root config failed: {stderr}")
+
+
+def _apply_ufw_defaults():
+    """Apply the repo's UFW policy defaults and enable the firewall."""
+    # TODO: Route firewall configuration through per-platform providers before adding Debian/macOS support.
+    if not shutil.which("ufw"):
+        log_warn("ufw not found — skipping firewall enablement.")
+        return
+
+    subprocess.run(["sudo", "ufw", "default", "deny", "incoming"])
+    subprocess.run(["sudo", "ufw", "default", "allow", "outgoing"])
+    subprocess.run(["sudo", "ufw", "--force", "enable"])
+    log_step("UFW defaults applied and firewall enabled.")
 
 
 def step_apply_system_configs():
@@ -507,7 +623,10 @@ def step_apply_system_configs():
         if confirm("Apply UFW rules? [y/N] "):
             for rules_file in ufw_dir.glob("*.rules"):
                 subprocess.run(["sudo", "cp", str(rules_file), "/etc/ufw/"])
+            _apply_ufw_defaults()
             subprocess.run(["sudo", "ufw", "reload"])
+
+    _configure_snapper_root()
 
     log_step("System configs applied.")
 
@@ -518,18 +637,12 @@ def step_apply_system_configs():
 def step_post_install():
     log_step("Post-install checklist:")
     checklist = """\
-  1.  Configure snapper for btrfs snapshots (needed for pre-setup rollbacks):
-        sudo snapper -c root create-config /
-  2.  Enable UFW firewall (rules were applied in step 10):
-        sudo ufw default deny incoming
-        sudo ufw default allow outgoing
-        sudo ufw enable
-  3.  Log in to 1Password:  1password --setup
-  4.  Log in to Firefox / Chrome / Floorp and sync
-  5.  Start spotifyd and log in with spotify-player
-  6.  Log in to Signal Desktop
-  7.  Pair KDE Connect on phone
-  8.  Log in to Niri — Noctalia will auto-download plugins on first launch
+  1.  Log in to 1Password:  1password --setup
+  2.  Log in to Firefox / Chrome / Floorp and sync
+  3.  Log in with spotify-player
+  4.  Log in to Signal Desktop
+  5.  Pair KDE Connect on phone
+  6.  Log in to Niri — Noctalia will auto-download plugins on first launch
         (plugin list managed via ~/.config/noctalia/plugins.json)"""
     print(checklist)
     print()
@@ -576,7 +689,28 @@ STEP_NAMES = {
 }
 
 
+def run_step(step_id: int, func) -> None:
+    """Run a setup step and record its structured result."""
+    step_name = STEP_NAMES[step_id]
+    RUNTIME.info("Running setup step", step=step_id, name=step_name)
+    try:
+        func()
+    except Exception as exc:
+        STEP_RESULTS.append({"step": step_id, "name": step_name, "status": "failed", "error": str(exc)})
+        RUNTIME.record_event("setup-step", status="failed", step=step_id, name=step_name, error=str(exc))
+        raise
+    STEP_RESULTS.append({"step": step_id, "name": step_name, "status": "ok"})
+    RUNTIME.record_event("setup-step", step=step_id, name=step_name)
+
+
 def main():
+    global ASSUME_YES, JSON_OUTPUT, RUNTIME
+    args = parse_args()
+    ASSUME_YES = args.yes
+    JSON_OUTPUT = args.json
+    RUNTIME = ToolRuntime("setup", log_format=args.log_format, json_output=args.json)
+    # TODO: Replace this interactive step runner with a declarative execution plan that Ansible can consume later.
+
     print()
     print("╔══════════════════════════════════════════╗")
     print("║    CachyOS Desktop Setup — phoenix       ║")
@@ -597,7 +731,12 @@ def main():
         print(f"  {num:>2}. {desc}")
     print()
 
-    choice = input("Run all steps? [y/N] or enter step number: ").strip()
+    if args.step:
+        choice = args.step.strip()
+    elif ASSUME_YES:
+        choice = "y"
+    else:
+        choice = input("Run all steps? [y/N] or enter step number: ").strip()
 
     steps = {
         "1": lambda: step_install_native(hw),
@@ -613,15 +752,25 @@ def main():
         "11": step_post_install,
     }
 
-    if choice.lower() in ("y", "yes"):
+    if choice.lower() in ("y", "yes", "all"):
         pre_snapshot()
-        for fn in steps.values():
-            fn()
+        RUNTIME.record_event("pre-snapshot")
+        for step_id, fn in ((int(key), value) for key, value in steps.items()):
+            run_step(step_id, fn)
     elif choice in steps:
         pre_snapshot()
-        steps[choice]()
+        RUNTIME.record_event("pre-snapshot")
+        run_step(int(choice), steps[choice])
     else:
         log_warn("Invalid choice. Run with a step number (1-11) or 'y' for all.")
+
+    if JSON_OUTPUT:
+        RUNTIME.emit_summary(
+            ok=True,
+            assume_yes=ASSUME_YES,
+            selected=choice,
+            steps=STEP_RESULTS,
+        )
 
 
 if __name__ == "__main__":
@@ -629,5 +778,5 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print()
-        log_warn("Interrupted.")
+        RUNTIME.warn("Interrupted.")
         sys.exit(1)
