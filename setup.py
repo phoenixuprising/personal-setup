@@ -249,6 +249,22 @@ def step_install_secrets():
     if op_accounts.exists():
         print("  1Password accounts available — sign in with: 1password --setup")
 
+    # Wallpapers
+    wallpapers_src = secrets_dir / "wallpapers"
+    if wallpapers_src.is_dir():
+        wallpapers_dest = home / "Pictures" / "Wallpapers"
+        wallpapers_dest.mkdir(parents=True, exist_ok=True)
+        count = 0
+        for img in wallpapers_src.iterdir():
+            if img.is_file():
+                dest = wallpapers_dest / img.name
+                shutil.copy2(img, dest)
+                count += 1
+        if count:
+            log_step(f"Installed {count} wallpaper(s) to {wallpapers_dest}")
+    else:
+        log_warn("No wallpapers/ in secrets — skipping wallpaper install.")
+
     # Configure sshd for pubkey-only access
     _configure_sshd()
 
@@ -398,6 +414,13 @@ def step_apply_system_configs():
         if confirm("Apply limine.conf? [y/N] "):
             subprocess.run(["sudo", "cp", str(limine), "/boot/limine.conf"])
 
+    # SDDM display manager
+    sddm = sysconf / "sddm.conf"
+    if sddm.exists():
+        log_warn("Will overwrite /etc/sddm.conf (sets astronaut theme + wayland)")
+        if confirm("Apply sddm.conf? [y/N] "):
+            subprocess.run(["sudo", "cp", str(sddm), "/etc/sddm.conf"])
+
     # UFW rules
     ufw_dir = sysconf / "ufw"
     if ufw_dir.is_dir():
@@ -437,7 +460,9 @@ def step_post_install():
   10. Set up UFW firewall rules:
         sudo ufw default deny incoming
         sudo ufw default allow outgoing
-        sudo ufw enable"""
+        sudo ufw enable
+  11. Log in to Niri — Noctalia will auto-download plugins on first launch
+        (plugin list managed via ~/.config/noctalia/plugins.json)"""
     print(checklist)
     print()
     log_step("Done! Reboot when ready.")

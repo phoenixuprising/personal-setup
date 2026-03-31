@@ -1,3 +1,3 @@
 function claude-chat
-    _claude-session haiku
+    _agent-session claude --model haiku $argv
 end

@@ -1,3 +1,3 @@
 function claude-code
-    _claude-session opus
+    _agent-session claude --model opus $argv
 end

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Collect secrets from the current machine into secrets/ for USB transfer.
+"""Collect secrets and user data from the current machine into secrets/ for USB transfer.
 
 Run this on the SOURCE machine before copying the repo to a USB drive.
-The secrets/ directory is gitignored and contains credentials that setup.py
-will install on the target machine.
+The secrets/ directory is gitignored and contains credentials and user data
+that setup.py will install on the target machine.
 
 Collected:
   - Claude Code credentials (~/.claude/.credentials.json)
@@ -11,6 +11,7 @@ Collected:
   - SSH config (~/.ssh/config, ~/.ssh/known_hosts)
   - SSH public key from 1Password (for authorized_keys on target)
   - 1Password account metadata
+  - Wallpapers (~/Pictures/Wallpapers/)
 """
 
 import shutil
@@ -114,6 +115,22 @@ def main():
                 log_warn("Could not extract SSH public key from 1Password.")
         except subprocess.TimeoutExpired:
             log_warn("1Password CLI timed out extracting SSH key.")
+
+    # ─── Wallpapers ───
+    wallpapers_src = Path("~/Pictures/Wallpapers").expanduser()
+    if wallpapers_src.is_dir():
+        wallpapers_dest = SECRETS_DIR / "wallpapers"
+        wallpapers_dest.mkdir(parents=True, exist_ok=True)
+        wp_count = 0
+        for img in wallpapers_src.iterdir():
+            if img.is_file():
+                shutil.copy2(img, wallpapers_dest / img.name)
+                wp_count += 1
+        if wp_count:
+            log_step(f"Collected {wp_count} wallpaper(s) → secrets/wallpapers/")
+            collected += 1
+    else:
+        log_warn("No ~/Pictures/Wallpapers/ directory found — skipping wallpapers.")
 
     # ─── Gitignore secrets/ ───
     gitignore = SCRIPT_DIR / ".gitignore"
