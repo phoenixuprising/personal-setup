@@ -394,22 +394,30 @@ def step_apply_chezmoi():
         return
 
     chezmoi_dir = Path.home() / ".local" / "share" / "chezmoi"
-    if chezmoi_dir.is_dir():
-        log_warn(f"Chezmoi source dir already exists at {chezmoi_dir}")
-        if not confirm("Overwrite? [y/N] "):
+    chezmoi_dir.parent.mkdir(parents=True, exist_ok=True)
+
+    if chezmoi_dir.is_symlink():
+        if chezmoi_dir.resolve() == chezmoi_src.resolve():
+            log_step("Symlink already points to chezmoi-source — nothing to do.")
+        else:
+            log_warn(f"Symlink exists but points to {chezmoi_dir.resolve()}")
+            if not confirm("Replace with link to this repo's chezmoi-source? [y/N] "):
+                log_warn("Skipped chezmoi setup.")
+                return
+            chezmoi_dir.unlink()
+            chezmoi_dir.symlink_to(chezmoi_src.resolve())
+            log_step(f"Symlink updated: {chezmoi_dir} → {chezmoi_src.resolve()}")
+    elif chezmoi_dir.is_dir():
+        log_warn(f"Chezmoi source dir already exists at {chezmoi_dir} (not a symlink)")
+        if not confirm("Replace with symlink to this repo's chezmoi-source? [y/N] "):
             log_warn("Skipped chezmoi setup.")
             return
         shutil.rmtree(chezmoi_dir)
-
-    chezmoi_dir.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(chezmoi_src, chezmoi_dir)
-
-    subprocess.run(["git", "init"], cwd=chezmoi_dir)
-    subprocess.run(["git", "add", "-A"], cwd=chezmoi_dir)
-    subprocess.run(
-        ["git", "commit", "-m", "Initial chezmoi source from personal-setup"],
-        cwd=chezmoi_dir,
-    )
+        chezmoi_dir.symlink_to(chezmoi_src.resolve())
+        log_step(f"Replaced with symlink: {chezmoi_dir} → {chezmoi_src.resolve()}")
+    else:
+        chezmoi_dir.symlink_to(chezmoi_src.resolve())
+        log_step(f"Created symlink: {chezmoi_dir} → {chezmoi_src.resolve()}")
 
     log_step("Previewing chezmoi changes...")
     subprocess.run(["chezmoi", "diff"])
