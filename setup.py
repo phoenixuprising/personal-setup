@@ -534,7 +534,7 @@ def step_post_install():
         sudo ufw enable
   3.  Log in to 1Password:  1password --setup
   4.  Log in to Firefox / Chrome / Floorp and sync
-  5.  Log in to Spotify (spotifyd + spotify-player)
+  5.  Start spotifyd and log in with spotify-player
   6.  Log in to Signal Desktop
   7.  Pair KDE Connect on phone
   8.  Log in to Niri — Noctalia will auto-download plugins on first launch

@@ -1,0 +1,43 @@
+[project]
+name = "system-ai-media-tools"
+version = "0.1.0"
+description = "Media download, extraction, and transcription helpers"
+requires-python = ">=3.11"
+dependencies = [
+    "av",
+    "loguru",
+    "openai-whisper",
+    "torch>=2.9.1",
+    "torchvision>=0.24.1",
+    "yt-dlp",
+]
+
+[project.scripts]
+media-transcribe = "media_transcribe:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", marker = "sys_platform != 'linux'" },
+    { index = "pytorch-cu130", marker = "sys_platform == 'linux'" },
+]
+torchvision = [
+    { index = "pytorch-cpu", marker = "sys_platform != 'linux'" },
+    { index = "pytorch-cu130", marker = "sys_platform == 'linux'" },
+]
+
+[tool.hatch.build.targets.wheel]
+only-include = ["media_transcribe.py"]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
