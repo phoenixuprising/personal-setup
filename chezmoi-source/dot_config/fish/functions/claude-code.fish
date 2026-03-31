@@ -1,3 +1,3 @@
 function claude-code
-    _agent-session claude --model opus $argv
+    _agent-tmux claude --model opus $argv
 end
