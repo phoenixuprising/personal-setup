@@ -3,3 +3,5 @@ forgetful-ai v0.2.5
 - forgetful-ai
 jcodemunch-mcp v1.8.3
 - jcodemunch-mcp
+command-help-parser local checkout
+- command-help-parser

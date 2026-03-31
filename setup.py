@@ -193,6 +193,11 @@ def step_install_uv_tools():
         return
     subprocess.run(["uv", "tool", "install", "forgetful-ai"])
     subprocess.run(["uv", "tool", "install", "jcodemunch-mcp"])
+    parser_repo = Path.home() / "Developement" / "command-help-parser"
+    if parser_repo.exists():
+        subprocess.run(["uv", "tool", "install", "--editable", str(parser_repo)])
+    else:
+        log_warn(f"command-help-parser repo not found at {parser_repo} — skipping local tool install.")
     log_step("uv tools installed.")
 
 
