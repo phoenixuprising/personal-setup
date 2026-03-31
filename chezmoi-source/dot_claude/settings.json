@@ -56,6 +56,16 @@
       }
     }
   },
+  "mcpServers": {
+    "forgetful": {
+      "command": "forgetful",
+      "args": []
+    },
+    "jcodemunch": {
+      "command": "jcodemunch-mcp",
+      "args": ["serve"]
+    }
+  },
   "effortLevel": "high",
   "skipDangerousModePermissionPrompt": true
 }
