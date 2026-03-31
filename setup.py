@@ -518,33 +518,45 @@ def step_apply_system_configs():
 def step_post_install():
     log_step("Post-install checklist:")
     checklist = """\
-  1.  Log in to 1Password:  1password --setup
-  2.  Log in to Firefox / Chrome / Floorp and sync
-  3.  Start spotifyd and log in with spotify-player
-  4.  Log in to Signal Desktop
-  5.  Set up SSH keys (check ~/.ssh/config applied by chezmoi)
-  6.  Configure KDE Connect on phone
-  7.  Set up Git credentials:  git config --global credential.helper store
-  8.  Configure snapper for btrfs snapshots:
+  1.  Configure snapper for btrfs snapshots (needed for pre-setup rollbacks):
         sudo snapper -c root create-config /
-  9.  Review /etc/fstab — this machine uses btrfs subvolumes:
-        @      → /
-        @home  → /home
-        @root  → /root
-        @srv   → /srv
-        @cache → /var/cache
-        @tmp   → /var/tmp
-        @log   → /var/log
-        Options: defaults,noatime,compress=zstd:1
-  10. Set up UFW firewall rules:
+  2.  Enable UFW firewall (rules were applied in step 10):
         sudo ufw default deny incoming
         sudo ufw default allow outgoing
         sudo ufw enable
-  11. Log in to Niri — Noctalia will auto-download plugins on first launch
+  3.  Log in to 1Password:  1password --setup
+  4.  Log in to Firefox / Chrome / Floorp and sync
+  5.  Start spotifyd and log in with spotify-player
+  6.  Log in to Signal Desktop
+  7.  Pair KDE Connect on phone
+  8.  Log in to Niri — Noctalia will auto-download plugins on first launch
         (plugin list managed via ~/.config/noctalia/plugins.json)"""
     print(checklist)
     print()
     log_step("Done! Reboot when ready.")
+
+
+# ─── Pre-step: Snapper snapshot ───────────────────────────────────────────────
+
+
+def pre_snapshot():
+    """Create a btrfs snapshot before applying any changes."""
+    if not shutil.which("snapper"):
+        log_warn("snapper not found — skipping pre-setup snapshot.")
+        return
+    sha = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"],
+        cwd=SCRIPT_DIR, capture_output=True, text=True,
+    )
+    desc = f"Before setup.py ({sha.stdout.strip()})" if sha.returncode == 0 else "Before setup.py"
+    result = subprocess.run(
+        ["sudo", "snapper", "create", "--description", desc, "--print-number"],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        log_step(f"Created snapper snapshot #{result.stdout.strip()}")
+    else:
+        log_warn(f"Snapper snapshot failed: {result.stderr.strip()}")
 
 
 # ─── Main ────────────────────────────────────────────────────────────────────
@@ -602,9 +614,11 @@ def main():
     }
 
     if choice.lower() in ("y", "yes"):
+        pre_snapshot()
         for fn in steps.values():
             fn()
     elif choice in steps:
+        pre_snapshot()
         steps[choice]()
     else:
         log_warn("Invalid choice. Run with a step number (1-11) or 'y' for all.")
