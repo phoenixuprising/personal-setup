@@ -11,6 +11,6 @@ function _agent-session --description "Start an agent session"
     end
 
     set -x CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR true
-    cd ~/empty
+    cd ~/system-ai
     command $agent $rest
 end
