@@ -5,12 +5,15 @@ Run on the target CachyOS machine. Outputs hardware-info.toml in the same
 directory as this script, which setup.py reads to auto-detect driver packages.
 """
 
+import argparse
 import json
 import os
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+from tool_runtime import ToolRuntime
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 
@@ -223,8 +226,35 @@ def probe_system():
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 
-def main():
-    print("Probing hardware...")
+def build_parser() -> argparse.ArgumentParser:
+    """Build the CLI parser for hardware probing."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=SCRIPT_DIR / "hardware-info.toml",
+        help="Output TOML path. Default: hardware-info.toml next to this script.",
+    )
+    parser.add_argument(
+        "--log-format",
+        choices=("text", "json"),
+        default="text",
+        help="Emit human-readable or JSON logs to stderr.",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit a machine-readable summary to stdout.",
+    )
+    return parser
+
+
+def main() -> int:
+    """Probe local hardware and write the generated inventory to disk."""
+    args = build_parser().parse_args()
+    runtime = ToolRuntime("probe-hardware", log_format=args.log_format, json_output=args.json)
+    # TODO: Replace the shell-based `run()` helper with explicit argv calls or sysfs parsing.
+    runtime.info("Probing hardware")
 
     data = {
         "cpu": probe_cpu(),
@@ -236,13 +266,27 @@ def main():
         "system": probe_system(),
     }
 
-    out_path = SCRIPT_DIR / "hardware-info.toml"
+    out_path = args.output.expanduser().resolve()
     write_toml(data, out_path)
+    runtime.record_event(
+        "write-hardware-info",
+        path=str(out_path),
+        gpu_count=len(data["gpu"]),
+        network_interface_count=len(data["network"]),
+    )
 
-    print()
-    print(f"Done. Hardware info written to: {out_path}")
-    print(out_path.read_text())
+    if not args.json:
+        print()
+        print(f"Done. Hardware info written to: {out_path}")
+        print(out_path.read_text())
+
+    runtime.emit_summary(
+        ok=True,
+        output_path=str(out_path),
+        hardware=data,
+    )
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
