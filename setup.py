@@ -526,29 +526,18 @@ def step_apply_system_configs():
 def step_post_install():
     log_step("Post-install checklist:")
     checklist = """\
-  1.  Log in to 1Password:  1password --setup
-  2.  Log in to Firefox / Chrome / Floorp and sync
-  3.  Log in to Spotify (spotifyd + spotify-player)
-  4.  Log in to Signal Desktop
-  5.  Set up SSH keys (check ~/.ssh/config applied by chezmoi)
-  6.  Configure KDE Connect on phone
-  7.  Set up Git credentials:  git config --global credential.helper store
-  8.  Configure snapper for btrfs snapshots:
+  1.  Configure snapper for btrfs snapshots (needed for pre-setup rollbacks):
         sudo snapper -c root create-config /
-  9.  Review /etc/fstab — this machine uses btrfs subvolumes:
-        @      → /
-        @home  → /home
-        @root  → /root
-        @srv   → /srv
-        @cache → /var/cache
-        @tmp   → /var/tmp
-        @log   → /var/log
-        Options: defaults,noatime,compress=zstd:1
-  10. Set up UFW firewall rules:
+  2.  Enable UFW firewall (rules were applied in step 10):
         sudo ufw default deny incoming
         sudo ufw default allow outgoing
         sudo ufw enable
-  11. Log in to Niri — Noctalia will auto-download plugins on first launch
+  3.  Log in to 1Password:  1password --setup
+  4.  Log in to Firefox / Chrome / Floorp and sync
+  5.  Log in to Spotify (spotifyd + spotify-player)
+  6.  Log in to Signal Desktop
+  7.  Pair KDE Connect on phone
+  8.  Log in to Niri — Noctalia will auto-download plugins on first launch
         (plugin list managed via ~/.config/noctalia/plugins.json)"""
     print(checklist)
     print()
