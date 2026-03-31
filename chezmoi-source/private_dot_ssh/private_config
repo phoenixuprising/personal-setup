@@ -1,2 +1,8 @@
+Host polaris
+	HostName 10.0.0.61
+	User phoenix
+	IdentityAgent ~/.1password/agent.sock
+	IdentityFile ~/.ssh/personal.pub
+
 Host *
 	IdentityAgent ~/.1password/agent.sock
