@@ -12,6 +12,7 @@ Personal CachyOS desktop bootstrap, dotfiles, and local AI-tooling repository fo
 - `services-system.txt`, `services-user.txt`: systemd units to enable.
 - `chezmoi-source/`: managed dotfiles and app configs.
 - `system-config/`: machine-level config files copied into `/etc` and related paths.
+- `chezmoi-source/dot_local/share/system-ai/ufw/`: canonical UFW rule files that `chezmoi apply` installs into `/etc/ufw/` via a sudo-backed script.
 - `secrets/`: gitignored directory with credentials for transfer (created by `collect-secrets.py`).
 - `pyproject.toml`, `uv.lock`: the repo-local Python tool environment managed with `uv`.
 

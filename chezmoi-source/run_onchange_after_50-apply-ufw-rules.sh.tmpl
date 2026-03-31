@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+UFW_RULE_DIR="{{ .chezmoi.homeDir }}/.local/share/system-ai/ufw"
+
+if ! command -v ufw >/dev/null 2>&1; then
+  echo "ufw not installed; skipping UFW sync" >&2
+  exit 0
+fi
+
+if [[ ! -f "${UFW_RULE_DIR}/user.rules" || ! -f "${UFW_RULE_DIR}/user6.rules" ]]; then
+  echo "chezmoi-managed UFW rules not found in ${UFW_RULE_DIR}; skipping sync" >&2
+  exit 0
+fi
+
+sudo install -m 600 "${UFW_RULE_DIR}/user.rules" /etc/ufw/user.rules
+sudo install -m 600 "${UFW_RULE_DIR}/user6.rules" /etc/ufw/user6.rules
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw --force enable
+sudo ufw reload

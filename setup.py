@@ -567,19 +567,6 @@ def _configure_snapper_root():
         log_warn(f"Snapper root config failed: {stderr}")
 
 
-def _apply_ufw_defaults():
-    """Apply the repo's UFW policy defaults and enable the firewall."""
-    # TODO: Route firewall configuration through per-platform providers before adding Debian/macOS support.
-    if not shutil.which("ufw"):
-        log_warn("ufw not found — skipping firewall enablement.")
-        return
-
-    subprocess.run(["sudo", "ufw", "default", "deny", "incoming"])
-    subprocess.run(["sudo", "ufw", "default", "allow", "outgoing"])
-    subprocess.run(["sudo", "ufw", "--force", "enable"])
-    log_step("UFW defaults applied and firewall enabled.")
-
-
 def step_apply_system_configs():
     log_step("Applying system configuration files...")
     sysconf = SCRIPT_DIR / "system-config"
@@ -615,16 +602,6 @@ def step_apply_system_configs():
         log_warn("Will overwrite /etc/sddm.conf (sets astronaut theme + wayland)")
         if confirm("Apply sddm.conf? [y/N] "):
             subprocess.run(["sudo", "cp", str(sddm), "/etc/sddm.conf"])
-
-    # UFW rules
-    ufw_dir = sysconf / "ufw"
-    if ufw_dir.is_dir():
-        log_warn("Will overwrite /etc/ufw/ rules")
-        if confirm("Apply UFW rules? [y/N] "):
-            for rules_file in ufw_dir.glob("*.rules"):
-                subprocess.run(["sudo", "cp", str(rules_file), "/etc/ufw/"])
-            _apply_ufw_defaults()
-            subprocess.run(["sudo", "ufw", "reload"])
 
     _configure_snapper_root()
 

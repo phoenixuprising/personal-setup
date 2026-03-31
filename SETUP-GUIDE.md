@@ -60,7 +60,7 @@ Here's what each does:
 | 7 | Apply chezmoi dotfiles (fish config, alacritty, etc.) | No |
 | 8 | Set hostname to polaris-1 | No |
 | 9 | Set default shell to fish | No |
-| 10 | Apply system configs (mkinitcpio, locale, limine, Snapper, UFW) | No |
+| 10 | Apply system configs (mkinitcpio, locale, limine, Snapper) | No |
 | 11 | Print post-install checklist | No |
 
 **Recommended order if running step-by-step:** Run 1-2 first (needs network), then the rest.
@@ -75,6 +75,8 @@ After setup.py finishes, handle these manually:
 4. **Signal:** Sign in to Signal Desktop.
 5. **KDE Connect:** Pair with your phone.
 6. **Reboot** and verify everything works.
+
+`chezmoi apply` now also syncs the managed UFW rules into `/etc/ufw/` via a sudo-backed script. That includes both SSH and KDE Connect allow rules.
 
 ### Phase 5: Verify SSH access
 
