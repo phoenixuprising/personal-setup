@@ -547,6 +547,29 @@ def step_post_install():
     log_step("Done! Reboot when ready.")
 
 
+# ─── Pre-step: Snapper snapshot ───────────────────────────────────────────────
+
+
+def pre_snapshot():
+    """Create a btrfs snapshot before applying any changes."""
+    if not shutil.which("snapper"):
+        log_warn("snapper not found — skipping pre-setup snapshot.")
+        return
+    sha = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"],
+        cwd=SCRIPT_DIR, capture_output=True, text=True,
+    )
+    desc = f"Before setup.py ({sha.stdout.strip()})" if sha.returncode == 0 else "Before setup.py"
+    result = subprocess.run(
+        ["sudo", "snapper", "create", "--description", desc, "--print-number"],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        log_step(f"Created snapper snapshot #{result.stdout.strip()}")
+    else:
+        log_warn(f"Snapper snapshot failed: {result.stderr.strip()}")
+
+
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 STEP_NAMES = {
@@ -602,9 +625,11 @@ def main():
     }
 
     if choice.lower() in ("y", "yes"):
+        pre_snapshot()
         for fn in steps.values():
             fn()
     elif choice in steps:
+        pre_snapshot()
         steps[choice]()
     else:
         log_warn("Invalid choice. Run with a step number (1-11) or 'y' for all.")
