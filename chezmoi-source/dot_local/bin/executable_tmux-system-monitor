@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}"
+STATE_FILE="$STATE_DIR/tmux-system-monitor-${UID}.cpu"
+
+if ! mkdir -p "$STATE_DIR" >/dev/null 2>&1 || ! touch "$STATE_FILE" >/dev/null 2>&1; then
+    STATE_DIR="/tmp"
+    STATE_FILE="$STATE_DIR/tmux-system-monitor-${UID}.cpu"
+fi
+
+read_cpu_totals() {
+    awk '/^cpu / {print $2 + $3 + $4 + $5 + $6 + $7 + $8, $5}' /proc/stat
+}
+
+cpu_usage() {
+    local total idle prev_total prev_idle diff_total diff_idle usage
+
+    read -r total idle < <(read_cpu_totals)
+
+    if [[ -r "$STATE_FILE" ]]; then
+        read -r prev_total prev_idle < "$STATE_FILE"
+        diff_total=$((total - prev_total))
+        diff_idle=$((idle - prev_idle))
+
+        if (( diff_total > 0 )); then
+            usage=$(( (100 * (diff_total - diff_idle)) / diff_total ))
+            printf '%s' "$usage"
+        else
+            printf '?'
+        fi
+    else
+        printf '?'
+    fi
+
+    printf '%s %s\n' "$total" "$idle" > "$STATE_FILE" 2>/dev/null || true
+}
+
+ram_usage() {
+    awk '
+        /^MemTotal:/ { total = $2 }
+        /^MemAvailable:/ { avail = $2 }
+        END {
+            if (total > 0 && avail >= 0) {
+                used = total - avail
+                printf "%.0f", (used * 100) / total
+            } else {
+                printf "?"
+            }
+        }
+    ' /proc/meminfo
+}
+
+vendor_name() {
+    case "$1" in
+        0x10de) printf 'NV' ;;
+        0x8086) printf 'INT' ;;
+        0x1002) printf 'AMD' ;;
+        *) printf 'GPU' ;;
+    esac
+}
+
+format_percent() {
+    local used="$1" total="$2"
+
+    if [[ -n "$used" && -n "$total" && "$total" -gt 0 ]]; then
+        printf '%s' $(( (100 * used) / total ))
+    else
+        printf '?'
+    fi
+}
+
+sysfs_gpu_stats() {
+    local card vendor busy label index=0 output="" vram_used vram_total vram_pct
+
+    for card in /sys/class/drm/card[0-9]*; do
+        [[ -d "$card/device" ]] || continue
+        [[ -r "$card/device/vendor" ]] || continue
+        [[ -r "$card/device/class" ]] || continue
+
+        if ! grep -q '^0x03' "$card/device/class"; then
+            continue
+        fi
+
+        if [[ ! -r "$card/device/gpu_busy_percent" ]]; then
+            continue
+        fi
+
+        read -r vendor < "$card/device/vendor"
+        read -r busy < "$card/device/gpu_busy_percent"
+        label="$(vendor_name "$vendor")$index"
+        output+=" ${label} ${busy}%"
+
+        if [[ -r "$card/device/mem_info_vram_used" && -r "$card/device/mem_info_vram_total" ]]; then
+            read -r vram_used < "$card/device/mem_info_vram_used"
+            read -r vram_total < "$card/device/mem_info_vram_total"
+            vram_pct="$(format_percent "$vram_used" "$vram_total")"
+            output+=" ${label}VRAM ${vram_pct}%"
+        fi
+
+        index=$((index + 1))
+    done
+
+    printf '%s' "$output"
+}
+
+nvidia_gpu_stats() {
+    local index util mem_used mem_total mem_pct output=""
+
+    command -v nvidia-smi >/dev/null 2>&1 || return 0
+
+    index=0
+    while IFS=, read -r _ util mem_used mem_total; do
+        util="${util//[[:space:]]/}"
+        mem_used="${mem_used//[[:space:]]/}"
+        mem_total="${mem_total//[[:space:]]/}"
+        [[ -n "$util" ]] || continue
+        output+=" NV$index ${util}%"
+        if [[ -n "$mem_used" && -n "$mem_total" ]]; then
+            mem_pct="$(format_percent "$mem_used" "$mem_total")"
+            output+=" NV${index}VRAM ${mem_pct}%"
+        fi
+        index=$((index + 1))
+    done < <(nvidia-smi --query-gpu=index,utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null || true)
+
+    printf '%s' "$output"
+}
+
+intel_gpu_stats() {
+    local busy output=""
+
+    if [[ -r /sys/class/drm/card0/device/gpu_busy_percent ]] && grep -q '^0x8086$' /sys/class/drm/card0/device/vendor 2>/dev/null; then
+        return 0
+    fi
+
+    command -v intel_gpu_top >/dev/null 2>&1 || return 0
+
+    busy="$(
+        timeout 0.5s intel_gpu_top -J -s 200 2>/dev/null \
+        | awk -F: '
+            /"busy"/ {
+                gsub(/[^0-9.]/, "", $2)
+                if ($2 != "") {
+                    print int($2 + 0.5)
+                    exit
+                }
+            }
+        ' \
+        | head -n1
+    )"
+
+    [[ -n "$busy" ]] || return 0
+    output+=" INT0 ${busy}%"
+    printf '%s' "$output"
+}
+
+gpu_stats() {
+    local output
+
+    output="$(sysfs_gpu_stats)"
+
+    if [[ "$output" != *"NV"* ]]; then
+        output+=$(nvidia_gpu_stats)
+    fi
+
+    if [[ "$output" != *"INT"* ]]; then
+        output+=$(intel_gpu_stats)
+    fi
+
+    printf '%s' "$output"
+}
+
+printf 'CPU %s%% RAM %s%%%s\n' "$(cpu_usage)" "$(ram_usage)" "$(gpu_stats)"
