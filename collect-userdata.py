@@ -9,69 +9,88 @@ Collected:
   - Wallpapers (~/Pictures/Wallpapers/)
 """
 
+import argparse
 import shutil
 import sys
 from pathlib import Path
 
+from tool_runtime import ToolRuntime
+
 SCRIPT_DIR = Path(__file__).parent.resolve()
 USERDATA_DIR = SCRIPT_DIR / "userdata"
 
-GREEN = "\033[32m"
-YELLOW = "\033[33m"
-RED = "\033[31m"
-RESET = "\033[0m"
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the CLI parser for userdata collection."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--log-format",
+        choices=("text", "json"),
+        default="text",
+        help="Emit human-readable or JSON logs to stderr.",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit a machine-readable summary to stdout.",
+    )
+    return parser
 
 
-def log_step(msg):
-    print(f"{GREEN}▶ {msg}{RESET}")
-
-
-def log_warn(msg):
-    print(f"{YELLOW}⚠ {msg}{RESET}")
-
-
-def main():
-    print()
-    print("Collecting user data for USB transfer...")
-    print()
+def main() -> int:
+    """Collect non-secret user data into the repo-local userdata directory."""
+    args = build_parser().parse_args()
+    runtime = ToolRuntime("collect-userdata", log_format=args.log_format, json_output=args.json)
+    runtime.info("Collecting user data for USB transfer")
+    # TODO: Move userdata collection to an inventory file so sources stay declarative.
 
     USERDATA_DIR.mkdir(exist_ok=True)
 
     collected = 0
+    wallpaper_count = 0
 
     # ─── Wallpapers ───
     wallpapers_src = Path("~/Pictures/Wallpapers").expanduser()
     if wallpapers_src.is_dir():
         wallpapers_dest = USERDATA_DIR / "wallpapers"
         wallpapers_dest.mkdir(parents=True, exist_ok=True)
-        wp_count = 0
         for img in wallpapers_src.iterdir():
             if img.is_file():
                 shutil.copy2(img, wallpapers_dest / img.name)
-                wp_count += 1
-        if wp_count:
-            log_step(f"Collected {wp_count} wallpaper(s) → userdata/wallpapers/")
+                wallpaper_count += 1
+        if wallpaper_count:
+            runtime.info("Collected wallpapers", count=wallpaper_count, destination="userdata/wallpapers")
+            runtime.record_event(
+                "collect-wallpapers",
+                count=wallpaper_count,
+                destination=str(wallpapers_dest),
+            )
             collected += 1
     else:
-        log_warn("No ~/Pictures/Wallpapers/ directory found — skipping wallpapers.")
+        runtime.warn("No ~/Pictures/Wallpapers/ directory found — skipping wallpapers")
 
-    print()
-    if collected:
-        log_step(f"Done — {collected} item(s) collected in userdata/")
+    if collected and not args.json:
         print()
+        print(f"Done — {collected} item(s) collected in userdata/")
         print("  Next steps:")
         print("    1. Copy this repo (with userdata/) to your USB drive")
-        print("    2. On the target machine, run: python3 setup.py")
+        print("    2. On the target machine, run: uv run python setup.py")
     else:
-        log_warn("No user data found to collect.")
+        runtime.warn("No user data found to collect")
 
-    print()
+    runtime.emit_summary(
+        ok=True,
+        collected_item_count=collected,
+        wallpaper_count=wallpaper_count,
+        output_dir=str(USERDATA_DIR),
+    )
+    return 0
 
 
 if __name__ == "__main__":
     try:
-        main()
+        raise SystemExit(main())
     except KeyboardInterrupt:
         print()
-        log_warn("Interrupted.")
+        ToolRuntime("collect-userdata").warn("Interrupted")
         sys.exit(1)

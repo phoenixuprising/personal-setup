@@ -14,6 +14,7 @@ Collected:
   - 1Password account metadata
 """
 
+import argparse
 import shutil
 import subprocess
 import sys
@@ -21,36 +22,44 @@ import tarfile
 import tempfile
 from pathlib import Path
 
+from tool_runtime import ToolRuntime
+
 SCRIPT_DIR = Path(__file__).parent.resolve()
 SECRETS_DIR = SCRIPT_DIR / "secrets"
 ENCRYPTED_FILE = SCRIPT_DIR / "secrets.age"
 OP_ITEM_TITLE = "system-ai Secrets Key"
-
-GREEN = "\033[32m"
-YELLOW = "\033[33m"
-RED = "\033[31m"
-RESET = "\033[0m"
+RUNTIME = ToolRuntime("collect-secrets")
 
 
-def log_step(msg):
-    print(f"{GREEN}▶ {msg}{RESET}")
-
-
-def log_warn(msg):
-    print(f"{YELLOW}⚠ {msg}{RESET}")
-
-
-def log_error(msg):
-    print(f"{RED}✗ {msg}{RESET}")
+def build_parser() -> argparse.ArgumentParser:
+    """Build the CLI parser for secrets collection."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--log-format",
+        choices=("text", "json"),
+        default="text",
+        help="Emit human-readable or JSON logs to stderr.",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit a machine-readable summary to stdout.",
+    )
+    parser.add_argument(
+        "--skip-git-commit",
+        action="store_true",
+        help="Encrypt secrets.age but do not create a git commit.",
+    )
+    return parser
 
 
 def check_prerequisites():
     """Fail early if age or op are not available."""
     if not shutil.which("age"):
-        log_error("age not found — install with: pacman -S age")
+        RUNTIME.error("age not found — install with: pacman -S age")
         sys.exit(1)
     if not shutil.which("op"):
-        log_error("1Password CLI (op) not found — install from: https://1password.com/downloads/command-line/")
+        RUNTIME.error("1Password CLI (op) not found — install from: https://1password.com/downloads/command-line/")
         sys.exit(1)
     # Check op is signed in
     result = subprocess.run(
@@ -58,7 +67,7 @@ def check_prerequisites():
         capture_output=True, text=True, timeout=5,
     )
     if result.returncode != 0 or not result.stdout.strip():
-        log_error("1Password CLI not signed in — run: eval $(op signin)")
+        RUNTIME.error("1Password CLI not signed in — run: eval $(op signin)")
         sys.exit(1)
 
 
@@ -66,7 +75,7 @@ def collect_file(src, dest_name, mode=0o600, dest_subdir=None):
     """Copy a file into secrets/, preserving nothing about the original path."""
     src = Path(src).expanduser()
     if not src.exists():
-        log_warn(f"Not found: {src}")
+        RUNTIME.warn("Optional file not found", path=str(src))
         return False
 
     dest_dir = SECRETS_DIR / dest_subdir if dest_subdir else SECRETS_DIR
@@ -75,7 +84,7 @@ def collect_file(src, dest_name, mode=0o600, dest_subdir=None):
 
     shutil.copy2(src, dest)
     dest.chmod(mode)
-    log_step(f"Collected {src} → {dest.relative_to(SCRIPT_DIR)}")
+    RUNTIME.info("Collected file", source=str(src), destination=str(dest.relative_to(SCRIPT_DIR)))
     return True
 
 
@@ -110,10 +119,13 @@ def collect_all():
             accounts_file = SECRETS_DIR / "op-accounts.json"
             accounts_file.write_text(result.stdout)
             accounts_file.chmod(0o600)
-            log_step(f"Collected 1Password account list → {accounts_file.relative_to(SCRIPT_DIR)}")
+            RUNTIME.info(
+                "Collected 1Password account list",
+                destination=str(accounts_file.relative_to(SCRIPT_DIR)),
+            )
             collected += 1
     except subprocess.TimeoutExpired:
-        log_warn("1Password CLI timed out — skipping account list.")
+        RUNTIME.warn("1Password CLI timed out — skipping account list")
 
     # Extract SSH public key for authorized_keys on the target
     try:
@@ -127,10 +139,10 @@ def collect_all():
             pubkey_file = ssh_dir / "authorized_keys"
             pubkey_file.write_text(result.stdout.strip() + "\n")
             pubkey_file.chmod(0o644)
-            log_step(f"Collected SSH public key → {pubkey_file.relative_to(SCRIPT_DIR)}")
+            RUNTIME.info("Collected SSH public key", destination=str(pubkey_file.relative_to(SCRIPT_DIR)))
             collected += 1
     except subprocess.TimeoutExpired:
-        log_warn("1Password CLI timed out extracting SSH key.")
+        RUNTIME.warn("1Password CLI timed out extracting SSH key")
 
     return collected
 
@@ -147,12 +159,12 @@ def _get_or_create_key():
     )
     if result.returncode == 0 and result.stdout.strip().startswith("AGE-SECRET-KEY-"):
         identity = result.stdout.strip()
-        log_step("Using existing age key from 1Password.")
+        RUNTIME.info("Using existing age key from 1Password")
     else:
         # Generate new keypair
         result = subprocess.run(["age-keygen"], capture_output=True, text=True)
         if result.returncode != 0:
-            log_error("Failed to generate age keypair.")
+            RUNTIME.error("Failed to generate age keypair")
             sys.exit(1)
         identity = None
         for line in result.stdout.splitlines():
@@ -160,10 +172,10 @@ def _get_or_create_key():
                 identity = line.strip()
                 break
         if not identity:
-            log_error("Failed to parse age keypair output.")
+            RUNTIME.error("Failed to parse age keypair output")
             sys.exit(1)
         _store_identity_in_1password(identity)
-        log_step("Generated new age key and stored in 1Password.")
+        RUNTIME.info("Generated new age key and stored in 1Password")
 
     # Derive recipient (public key) from identity
     result = subprocess.run(
@@ -171,7 +183,7 @@ def _get_or_create_key():
         input=identity, capture_output=True, text=True,
     )
     if result.returncode != 0 or not result.stdout.strip():
-        log_error("Failed to derive public key from age identity.")
+        RUNTIME.error("Failed to derive public key from age identity")
         sys.exit(1)
     recipient = result.stdout.strip()
 
@@ -189,7 +201,7 @@ def encrypt_secrets():
     try:
         with tarfile.open(tarball_path, "w") as tar:
             tar.add(SECRETS_DIR, arcname="secrets")
-        log_step("Created secrets tarball.")
+        RUNTIME.info("Created secrets tarball")
 
         # Encrypt with age
         result = subprocess.run(
@@ -197,15 +209,15 @@ def encrypt_secrets():
             capture_output=True, text=True,
         )
         if result.returncode != 0:
-            log_error(f"age encryption failed: {result.stderr}")
+            RUNTIME.error("age encryption failed", stderr=result.stderr.strip())
             sys.exit(1)
-        log_step(f"Encrypted → {ENCRYPTED_FILE.relative_to(SCRIPT_DIR)}")
+        RUNTIME.info("Encrypted secrets archive", destination=str(ENCRYPTED_FILE.relative_to(SCRIPT_DIR)))
     finally:
         tarball_path.unlink(missing_ok=True)
 
     # Clean up plaintext secrets/
     shutil.rmtree(SECRETS_DIR)
-    log_step("Removed plaintext secrets/ directory.")
+    RUNTIME.info("Removed plaintext secrets directory")
 
 
 def _store_identity_in_1password(identity):
@@ -223,7 +235,7 @@ def _store_identity_in_1password(identity):
             capture_output=True, text=True, timeout=10,
             check=True,
         )
-        log_step(f"Updated 1Password item: {OP_ITEM_TITLE}")
+        RUNTIME.info("Updated 1Password item", title=OP_ITEM_TITLE)
     else:
         # Item does not exist — create it
         subprocess.run(
@@ -234,11 +246,12 @@ def _store_identity_in_1password(identity):
             capture_output=True, text=True, timeout=10,
             check=True,
         )
-        log_step(f"Created 1Password item: {OP_ITEM_TITLE}")
+        RUNTIME.info("Created 1Password item", title=OP_ITEM_TITLE)
 
 
 def commit_secrets():
     """Stage and commit secrets.age."""
+    # TODO: Split repo mutation from collection so CI and non-git users can reuse this script safely.
     subprocess.run(
         ["git", "add", str(ENCRYPTED_FILE)],
         cwd=SCRIPT_DIR, check=True,
@@ -248,41 +261,61 @@ def commit_secrets():
         cwd=SCRIPT_DIR,
     )
     if result.returncode == 0:
-        log_step("secrets.age unchanged — nothing to commit.")
+        RUNTIME.info("secrets.age unchanged — nothing to commit")
         return
     subprocess.run(
         ["git", "commit", "-m", "updated secrets."],
         cwd=SCRIPT_DIR, check=True,
     )
-    log_step("Committed secrets.age.")
+    RUNTIME.info("Committed secrets.age")
 
 
-def main():
-    print()
-    print("Collecting and encrypting secrets...")
-    print()
+def main() -> int:
+    """Collect, encrypt, and optionally commit transferable secrets."""
+    global RUNTIME
+    args = build_parser().parse_args()
+    RUNTIME = ToolRuntime("collect-secrets", log_format=args.log_format, json_output=args.json)
+    RUNTIME.info("Collecting and encrypting secrets")
 
     check_prerequisites()
 
     collected = collect_all()
 
     if not collected:
-        log_warn("No secrets found to collect.")
-        print()
-        return
+        RUNTIME.warn("No secrets found to collect")
+        RUNTIME.emit_summary(ok=True, collected_item_count=0, committed=False, encrypted=False)
+        return 0
 
     encrypt_secrets()
-    commit_secrets()
+    committed = False
+    if not args.skip_git_commit:
+        commit_secrets()
+        committed = True
 
-    print()
-    log_step(f"Done — {collected} item(s) encrypted and committed.")
-    print()
+    RUNTIME.record_event(
+        "collect-secrets",
+        count=collected,
+        encrypted_file=str(ENCRYPTED_FILE),
+        committed=committed,
+    )
+    if not args.json:
+        print()
+        RUNTIME.info("Secrets workflow completed", collected_item_count=collected, committed=committed)
+        print()
+    RUNTIME.emit_summary(
+        ok=True,
+        collected_item_count=collected,
+        committed=committed,
+        encrypted=True,
+        encrypted_file=str(ENCRYPTED_FILE),
+    )
+    return 0
 
 
 if __name__ == "__main__":
     try:
-        main()
+        raise SystemExit(main())
     except KeyboardInterrupt:
         print()
-        log_warn("Interrupted.")
+        ToolRuntime("collect-secrets").warn("Interrupted")
         sys.exit(1)

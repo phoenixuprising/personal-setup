@@ -41,10 +41,13 @@ Step-by-step instructions for setting up polaris-1 (or any new CachyOS machine) 
 ### Phase 3: Run setup
 
 ```
-python3 setup.py
+uv run python setup.py
 ```
 
-You can run all 11 steps at once (enter `y`) or pick individual steps by number. Here's what each does:
+You can run all 11 steps at once (enter `y`) or pick individual steps by number.
+For a non-interactive run that auto-accepts confirmations, use `uv run python setup.py -y`.
+For machine-readable output, add `--json`.
+Here's what each does:
 
 | Step | What it does | Needs internet? |
 |------|-------------|-----------------|
@@ -57,7 +60,7 @@ You can run all 11 steps at once (enter `y`) or pick individual steps by number.
 | 7 | Apply chezmoi dotfiles (fish config, alacritty, etc.) | No |
 | 8 | Set hostname to polaris-1 | No |
 | 9 | Set default shell to fish | No |
-| 10 | Apply system configs (mkinitcpio, locale, limine, UFW) | No |
+| 10 | Apply system configs (mkinitcpio, locale, limine, Snapper) | No |
 | 11 | Print post-install checklist | No |
 
 **Recommended order if running step-by-step:** Run 1-2 first (needs network), then the rest.
@@ -68,17 +71,12 @@ After setup.py finishes, handle these manually:
 
 1. **1Password:** `1password --setup` — sign in to unlock SSH agent + git signing.
 2. **Browsers:** Sign in to Firefox / Chrome / Floorp and sync.
-3. **Spotify:** Start the `spotifyd` user service and sign in with `spotify-player`.
+3. **Spotify:** Sign in with `spotify-player`.
 4. **Signal:** Sign in to Signal Desktop.
 5. **KDE Connect:** Pair with your phone.
-6. **Snapper:** `sudo snapper -c root create-config /`
-7. **UFW firewall:**
-   ```
-   sudo ufw default deny incoming
-   sudo ufw default allow outgoing
-   sudo ufw enable
-   ```
-8. **Reboot** and verify everything works.
+6. **Reboot** and verify everything works.
+
+`chezmoi apply` now also syncs the managed UFW rules into `/etc/ufw/` via a sudo-backed script. That includes both SSH and KDE Connect allow rules.
 
 ### Phase 5: Verify SSH access
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import re
 import shutil
 import subprocess
@@ -108,6 +109,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--debug",
         action="store_true",
         help="Enable debug logging.",
+    )
+    parser.add_argument(
+        "--log-format",
+        choices=("text", "json"),
+        default="text",
+        help="Emit human-readable or JSON logs to stderr. Default: text",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit a machine-readable summary to stdout.",
     )
     parser.add_argument(
         "--capture",
@@ -216,6 +228,7 @@ def live_transcribe_audio(
     compute_type: str = "auto",
 ) -> Path:
     """Record PCM audio from a local source and transcribe rolling chunks with faster-whisper."""
+    # TODO: Split capture backends from transcription so non-Linux implementations can slot in later.
     try:
         from faster_whisper import WhisperModel
         import numpy as np
@@ -269,7 +282,6 @@ def live_transcribe_audio(
         """Simple Textual app to display live capture status and transcript output."""
 
         BINDINGS = [("ctrl+q", "quit_capture", "Quit")]
-
         CSS = """
         Screen {
             layout: vertical;
@@ -345,12 +357,12 @@ def live_transcribe_audio(
             app.call_from_thread(callback)
         except RuntimeError:
             pass
-
     def transcribe_chunk(pcm_data: bytes) -> None:
         nonlocal chunk_index, transcript_line_count, status_message
         if not pcm_data.strip(b"\x00"):
             return
 
+        # TODO: Add overlap-aware chunk stitching so repeated words at chunk boundaries can be de-duplicated.
         chunk_index += 1
         status_message = f"Transcribing chunk {chunk_index}"
         safe_ui_update(app.update_status)
@@ -431,6 +443,7 @@ def get_default_sink() -> str:
 def create_virtual_sink(sink_name: str) -> tuple[list[str], str, str]:
     """Create a temporary null sink, mirror it to the current default sink, and return module ids."""
     ensure_command("pactl")
+    # TODO: Move Linux/PipeWire routing into an explicit backend module before adding Debian/macOS support.
     sink_name = console_friendly_name(sink_name).lower()
     mirrored_sink = get_default_sink()
     module_ids: list[str] = []
@@ -697,6 +710,7 @@ def main() -> int:
         sys.stderr,
         level="DEBUG" if args.debug else "INFO",
         format="<level>{level: <8}</level> {message}",
+        serialize=args.log_format == "json",
     )
 
     explicit_output_dir = args.output_dir is not None
@@ -716,6 +730,10 @@ def main() -> int:
 
     if args.source is None and not args.capture:
         raise SystemExit("Provide a source path/URL or use --capture for local audio capture.")
+    if args.source is not None and args.capture:
+        raise SystemExit("Use either a source path/URL or --capture, not both.")
+    if args.capture and args.chunk_seconds <= 0:
+        raise SystemExit("--chunk-seconds must be a positive integer.")
 
     virtual_sink_module_ids: list[str] | None = None
     try:
@@ -741,6 +759,21 @@ def main() -> int:
                 chunk_seconds=args.chunk_seconds,
                 compute_type=args.compute_type,
             )
+            if args.json:
+                print(json.dumps(
+                    {
+                        "tool": "media-transcribe",
+                        "ok": True,
+                        "mode": "capture",
+                        "device": whisper_device,
+                        "model": args.model,
+                        "capture_source": capture_source,
+                        "transcript_path": str(transcript_path),
+                        "working_dir": str(working_dir),
+                    },
+                    indent=2,
+                    sort_keys=True,
+                ))
             return 0
         else:
             assert args.source is not None
@@ -775,6 +808,23 @@ def main() -> int:
             audio_path.unlink(missing_ok=True)
 
         logger.info("Transcript written to {}", transcript_path)
+        if args.json:
+            print(json.dumps(
+                {
+                    "tool": "media-transcribe",
+                    "ok": True,
+                    "mode": "file",
+                    "device": whisper_device,
+                    "model": args.model,
+                    "source_path": str(source_path),
+                    "audio_path": str(audio_path),
+                    "transcript_path": str(transcript_path),
+                    "working_dir": str(working_dir),
+                    "output_format": args.output_format,
+                },
+                indent=2,
+                    sort_keys=True,
+                ))
         return 0
     finally:
         if virtual_sink_module_ids is not None:
@@ -807,6 +857,22 @@ def cli() -> int:
         error_log = write_exception_log(fallback_output_dir, exc)
         print(str(exc), file=sys.stderr)
         print(f"Exception log written to: {error_log}", file=sys.stderr)
+        if len(sys.argv) > 1:
+            try:
+                args, _ = build_parser().parse_known_args()
+                if args.json:
+                    print(json.dumps(
+                        {
+                            "tool": "media-transcribe",
+                            "ok": False,
+                            "error": str(exc),
+                            "error_log": str(error_log),
+                        },
+                        indent=2,
+                        sort_keys=True,
+                    ))
+            except Exception:
+                pass
         return code
     except Exception as exc:
         fallback_output_dir = Path.cwd()
@@ -820,6 +886,22 @@ def cli() -> int:
         error_log = write_exception_log(fallback_output_dir, exc)
         logger.exception("Unhandled exception")
         print(f"Exception log written to: {error_log}", file=sys.stderr)
+        if len(sys.argv) > 1:
+            try:
+                args, _ = build_parser().parse_known_args()
+                if args.json:
+                    print(json.dumps(
+                        {
+                            "tool": "media-transcribe",
+                            "ok": False,
+                            "error": str(exc),
+                            "error_log": str(error_log),
+                        },
+                        indent=2,
+                        sort_keys=True,
+                    ))
+            except Exception:
+                pass
         return 1
 
 

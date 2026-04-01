@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+UFW_RULE_DIR="{{ .chezmoi.homeDir }}/.local/share/system-ai/ufw"
+RULES_FILE="${UFW_RULE_DIR}/rules.txt"
+
+if ! command -v ufw >/dev/null 2>&1; then
+  echo "ufw not installed; skipping UFW sync" >&2
+  exit 0
+fi
+
+if [[ ! -f "${RULES_FILE}" ]]; then
+  echo "chezmoi-managed UFW rules not found in ${RULES_FILE}; skipping sync" >&2
+  exit 0
+fi
+
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+
+while IFS= read -r rule; do
+  [[ -z "${rule}" ]] && continue
+  sudo ufw allow "${rule}"
+done < "${RULES_FILE}"
+
+sudo ufw --force enable
+sudo ufw reload
+
+while IFS= read -r rule; do
+  [[ -z "${rule}" ]] && continue
+  if ! sudo ufw status | grep -Fq "${rule}"; then
+    echo "UFW sync failed: expected rule '${rule}' not present in ufw status output" >&2
+    exit 1
+  fi
+done < "${RULES_FILE}"
