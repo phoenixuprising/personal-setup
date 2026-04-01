@@ -4,11 +4,12 @@ Personal CachyOS desktop bootstrap, dotfiles, and local AI-tooling repository fo
 
 ## What’s in this repo
 
-- `setup.py`: interactive machine provisioning script (11 steps).
+- `setup.py`: interactive machine provisioning script (13 steps).
 - `probe-hardware.py`: captures target-machine hardware into `hardware-info.toml`.
 - `collect-secrets.py`: gathers credentials from the source machine into `secrets/` for USB transfer.
 - `media_transcribe.py`: repo-local transcription tool exposed through the `media-transcribe` CLI.
 - `packages-native.txt`, `packages-aur.txt`: package inventories for `pacman` and `yay`.
+- `vscode-extensions.txt`: VS Code extensions installed by the setup script.
 - `services-system.txt`, `services-user.txt`: systemd units to enable.
 - `chezmoi-source/`: managed dotfiles and app configs.
 - `system-config/`: machine-level config files copied into `/etc` and related paths.
@@ -31,13 +32,27 @@ uv run python probe-hardware.py      # detect hardware for driver auto-install
 uv run python setup.py               # run all steps or pick individual ones
 ```
 
-`setup.py` can run all steps or a single numbered step. It handles package installation, service enablement, uv tool installation, chezmoi setup, hostname/shell changes, and selected system config application.
+`setup.py` can run all steps or a single numbered step. It handles package installation, service enablement, uv tool installation, VS Code extension installation, chezmoi setup, hostname/shell changes, and selected system config application.
+
+The repo now bootstraps a mixed AI coding setup:
+
+- `ollama` as the local model runtime, enabled as a system service.
+- `aider-chat` as a terminal coding harness, installed through `uv tool`.
+- Continue as a VS Code extension, configured via `chezmoi-source/dot_continue/config.yaml`.
+- Default mixed-model configs that use `gpt-5` for stronger reasoning and `qwen2.5-coder:14b` through Ollama for local autocomplete and lighter edits.
 
 For repo-local tools:
 ```bash
 uv sync
 uv run media-transcribe --help
 ```
+
+The setup flow now includes an explicit Ollama model pull step. If you need to do it manually:
+```bash
+ollama pull qwen2.5-coder:14b
+```
+
+Hosted-model API keys are still user-specific. Set `OPENAI_API_KEY` in your shell environment before using Aider, and complete any key/sign-in prompts Continue shows on first launch.
 
 Most tools are moving toward a common CLI shape with `--json` summaries and `--log-format text|json` support so AI agents and shell automation can consume them reliably.
 

@@ -29,6 +29,7 @@ ASSUME_YES = False
 JSON_OUTPUT = False
 STEP_RESULTS: list[dict[str, object]] = []
 RUNTIME = ToolRuntime("setup")
+DEFAULT_OLLAMA_CODING_MODEL = "qwen2.5-coder:14b"
 
 
 def log_step(msg):
@@ -96,6 +97,18 @@ def load_hardware():
         return tomllib.load(f)
 
 
+def has_intel_igpu(hw):
+    """Return True when the machine has an Intel CPU and an Intel GPU."""
+    if hw is None:
+        return False
+
+    cpu_vendor = hw.get("cpu", {}).get("vendor", "").lower()
+    if "intel" not in cpu_vendor:
+        return False
+
+    return any(gpu.get("vendor") == "intel" for gpu in hw.get("gpu", []))
+
+
 def get_hardware_packages(hw):
     """Extract hardware-specific package list from hardware data."""
     if hw is None:
@@ -113,6 +126,8 @@ def get_hardware_packages(hw):
         if gpu.get("vendor") == "nvidia":
             pkgs.add("linux-cachyos-nvidia-open")
             pkgs.add("linux-cachyos-lts-nvidia-open")
+    if has_intel_igpu(hw):
+        pkgs.add("intel-gpu-tools")
     return sorted(pkgs)
 
 
@@ -250,7 +265,47 @@ def step_install_uv_tools():
     log_step("uv tools installed.")
 
 
-# ─── Step 6: Install secrets ─────────────────────────────────────────────────
+# ─── Step 6: Pull Ollama coding model ────────────────────────────────────────
+
+
+def step_pull_ollama_model():
+    log_step("Pulling default Ollama coding model...")
+    if not shutil.which("ollama"):
+        log_warn("ollama not found — install native packages first.")
+        return
+
+    if not confirm(f"Pull Ollama model {DEFAULT_OLLAMA_CODING_MODEL}? [y/N] "):
+        log_warn("Skipped Ollama model pull.")
+        return
+
+    subprocess.run(["sudo", "systemctl", "enable", "--now", "ollama.service"])
+    subprocess.run(["ollama", "pull", DEFAULT_OLLAMA_CODING_MODEL])
+    RUNTIME.record_event("pull-ollama-model", model=DEFAULT_OLLAMA_CODING_MODEL)
+    log_step("Ollama coding model pulled.")
+
+
+# ─── Step 7: Install VS Code extensions ──────────────────────────────────────
+
+
+def step_install_vscode_extensions():
+    log_step("Installing VS Code extensions...")
+    if not shutil.which("code"):
+        log_warn("VS Code CLI not found — skipping extension install.")
+        return
+
+    extensions = read_list("vscode-extensions.txt")
+    if not extensions:
+        log_warn("No extensions found in vscode-extensions.txt")
+        return
+
+    for extension in extensions:
+        subprocess.run(["code", "--install-extension", extension, "--force"])
+        RUNTIME.record_event("install-vscode-extension", extension=extension)
+
+    log_step("VS Code extensions installed.")
+
+
+# ─── Step 8: Install secrets ─────────────────────────────────────────────────
 
 
 def _install_secret(src, dest, label, mode=0o600):
@@ -441,7 +496,7 @@ def _configure_sshd():
     log_step("sshd enabled and started.")
 
 
-# ─── Step 7: Apply chezmoi dotfiles ──────────────────────────────────────────
+# ─── Step 9: Apply chezmoi dotfiles ──────────────────────────────────────────
 
 
 def step_apply_chezmoi():
@@ -491,7 +546,7 @@ def step_apply_chezmoi():
     log_step("Chezmoi dotfiles applied.")
 
 
-# ─── Step 7: Set hostname ───────────────────────────────────────────────────
+# ─── Step 10: Set hostname ──────────────────────────────────────────────────
 
 
 def step_set_hostname():
@@ -516,7 +571,7 @@ def step_set_hostname():
         log_step(f"Hostname set to {choice}.")
 
 
-# ─── Step 8: Set default shell to fish ───────────────────────────────────────
+# ─── Step 11: Set default shell to fish ──────────────────────────────────────
 
 
 def step_set_fish_shell():
@@ -528,7 +583,7 @@ def step_set_fish_shell():
     log_step("Default shell set to fish. Log out and back in for it to take effect.")
 
 
-# ─── Step 9: Apply system configs ────────────────────────────────────────────
+# ─── Step 12: Apply system configs ───────────────────────────────────────────
 
 
 def _root_filesystem_type():
@@ -618,7 +673,7 @@ def step_apply_system_configs():
     log_step("System configs applied.")
 
 
-# ─── Step 10: Post-install reminders ─────────────────────────────────────────
+# ─── Step 13: Post-install reminders ─────────────────────────────────────────
 
 
 def step_post_install():
@@ -630,7 +685,9 @@ def step_post_install():
   4.  Log in to Signal Desktop
   5.  Pair KDE Connect on phone
   6.  Log in to Niri — Noctalia will auto-download plugins on first launch
-        (plugin list managed via ~/.config/noctalia/plugins.json)"""
+        (plugin list managed via ~/.config/noctalia/plugins.json)
+  7.  Verify the Ollama coding model is available:  ollama list
+  8.  Set OPENAI_API_KEY before using aider or Continue with hosted models"""
     print(checklist)
     print()
     log_step("Done! Reboot when ready.")
@@ -667,12 +724,14 @@ STEP_NAMES = {
     3: "Enable system services",
     4: "Enable user services",
     5: "Install uv tools",
-    6: "Install secrets (Claude, git, SSH from USB)",
-    7: "Apply chezmoi dotfiles",
-    8: "Set hostname (polaris-1)",
-    9: "Set default shell to fish",
-    10: "Apply system configs",
-    11: "Post-install checklist",
+    6: "Pull default Ollama coding model",
+    7: "Install VS Code extensions",
+    8: "Install secrets (Claude, git, SSH from USB)",
+    9: "Apply chezmoi dotfiles",
+    10: "Set hostname (polaris-1)",
+    11: "Set default shell to fish",
+    12: "Apply system configs",
+    13: "Post-install checklist",
 }
 
 
@@ -731,12 +790,14 @@ def main():
         "3": step_enable_system_services,
         "4": step_enable_user_services,
         "5": step_install_uv_tools,
-        "6": step_install_secrets,
-        "7": step_apply_chezmoi,
-        "8": step_set_hostname,
-        "9": step_set_fish_shell,
-        "10": step_apply_system_configs,
-        "11": step_post_install,
+        "6": step_pull_ollama_model,
+        "7": step_install_vscode_extensions,
+        "8": step_install_secrets,
+        "9": step_apply_chezmoi,
+        "10": step_set_hostname,
+        "11": step_set_fish_shell,
+        "12": step_apply_system_configs,
+        "13": step_post_install,
     }
 
     if choice.lower() in ("y", "yes", "all"):
@@ -749,7 +810,7 @@ def main():
         RUNTIME.record_event("pre-snapshot")
         run_step(int(choice), steps[choice])
     else:
-        log_warn("Invalid choice. Run with a step number (1-11) or 'y' for all.")
+        log_warn("Invalid choice. Run with a step number (1-13) or 'y' for all.")
 
     if JSON_OUTPUT:
         RUNTIME.emit_summary(

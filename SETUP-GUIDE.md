@@ -44,7 +44,7 @@ Step-by-step instructions for setting up polaris-1 (or any new CachyOS machine) 
 uv run python setup.py
 ```
 
-You can run all 11 steps at once (enter `y`) or pick individual steps by number.
+You can run all 13 steps at once (enter `y`) or pick individual steps by number.
 For a non-interactive run that auto-accepts confirmations, use `uv run python setup.py -y`.
 For machine-readable output, add `--json`.
 Here's what each does:
@@ -55,13 +55,15 @@ Here's what each does:
 | 2 | Install AUR packages (yay) | Yes |
 | 3 | Enable system services (bluetooth, NetworkManager, etc.) | No |
 | 4 | Enable user services (pipewire, etc.) | No |
-| 5 | Install uv tools (forgetful-ai, jcodemunch-mcp, command-help-parser if checked out locally) | Yes |
-| 6 | Install secrets (Claude creds, git config, SSH keys, sshd) | No |
-| 7 | Apply chezmoi dotfiles (fish config, alacritty, etc.) | No |
-| 8 | Set hostname to polaris-1 | No |
-| 9 | Set default shell to fish | No |
-| 10 | Apply system configs (mkinitcpio, locale, limine, Snapper) | No |
-| 11 | Print post-install checklist | No |
+| 5 | Install uv tools (forgetful-ai, aider-chat, jcodemunch-mcp, command-help-parser if checked out locally) | Yes |
+| 6 | Pull the default Ollama coding model (`qwen2.5-coder:14b`) | Yes |
+| 7 | Install VS Code extensions (currently Continue) | No |
+| 8 | Install secrets (Claude creds, git config, SSH keys, sshd) | No |
+| 9 | Apply chezmoi dotfiles (fish config, alacritty, AI harness configs, etc.) | No |
+| 10 | Set hostname to polaris-1 | No |
+| 11 | Set default shell to fish | No |
+| 12 | Apply system configs (mkinitcpio, locale, limine, Snapper) | No |
+| 13 | Print post-install checklist | No |
 
 **Recommended order if running step-by-step:** Run 1-2 first (needs network), then the rest.
 
@@ -74,7 +76,11 @@ After setup.py finishes, handle these manually:
 3. **Spotify:** Sign in with `spotify-player`.
 4. **Signal:** Sign in to Signal Desktop.
 5. **KDE Connect:** Pair with your phone.
-6. **Reboot** and verify everything works.
+6. **AI harnesses:**
+   - `ollama list` should show `qwen2.5-coder:14b`
+   - Set `OPENAI_API_KEY` in your shell for Aider.
+   - Open VS Code once so Continue can finish first-run setup and let you pick active models per role.
+7. **Reboot** and verify everything works.
 
 `chezmoi apply` now also syncs the managed UFW rules into `/etc/ufw/` via a sudo-backed script. That includes both SSH and KDE Connect allow rules.
 

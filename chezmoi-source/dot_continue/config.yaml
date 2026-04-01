@@ -1,0 +1,30 @@
+name: system-ai
+version: 0.1.0
+schema: v1
+
+models:
+  - name: OpenAI GPT-5
+    provider: openai
+    model: gpt-5
+    roles:
+      - chat
+      - edit
+      - apply
+      - summarize
+
+  - name: Ollama Qwen2.5 Coder 14B
+    provider: ollama
+    model: qwen2.5-coder:14b
+    apiBase: http://127.0.0.1:11434
+    roles:
+      - autocomplete
+      - edit
+      - apply
+    autocompleteOptions:
+      debounceDelay: 200
+      maxPromptTokens: 1024
+
+rules:
+  - Prefer the local Ollama model for autocomplete and short edit/apply tasks.
+  - Use GPT-5 for repo-wide planning, debugging, and larger refactors.
+  - If the local model is unavailable, switch edit/apply back to GPT-5 from Continue's model picker.

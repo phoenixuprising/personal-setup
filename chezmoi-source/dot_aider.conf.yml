@@ -1,0 +1,6 @@
+# Use a paid OpenAI model for the main chat/edit loop and keep a local Ollama
+# model available for lighter editor and weak-model work.
+model: gpt-5
+weak-model: ollama_chat/qwen2.5-coder:14b
+editor-model: ollama_chat/qwen2.5-coder:14b
+editor-edit-format: diff
