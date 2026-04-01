@@ -30,6 +30,7 @@ JSON_OUTPUT = False
 STEP_RESULTS: list[dict[str, object]] = []
 RUNTIME = ToolRuntime("setup")
 DEFAULT_OLLAMA_CODING_MODEL = "qwen2.5-coder:14b"
+TAILSCALE_AUTH_KEY_STAGING_PATH = Path.home() / ".local" / "state" / "system-ai" / "tailscale-auth-key.txt"
 
 
 def log_step(msg):
@@ -323,6 +324,14 @@ def _install_secret(src, dest, label, mode=0o600):
     log_step(f"{label} installed.")
 
 
+def _read_optional_secret(path: Path) -> str | None:
+    """Read a secret file if it exists and contains non-empty text."""
+    if not path.exists():
+        return None
+    secret = path.read_text().strip()
+    return secret or None
+
+
 ENCRYPTED_FILE = SCRIPT_DIR / "secrets.age"
 OP_ITEM_TITLE = "system-ai Secrets Key"
 
@@ -432,6 +441,14 @@ def step_install_secrets():
     if op_accounts.exists():
         print("  1Password accounts available — sign in with: 1password --setup")
 
+    tailscale_auth_key = secrets_dir / "tailscale-auth-key.txt"
+    if tailscale_auth_key.exists():
+        _install_secret(
+            tailscale_auth_key,
+            TAILSCALE_AUTH_KEY_STAGING_PATH,
+            "Tailscale auth key (staged for setup)",
+        )
+
     # Wallpapers — from userdata/
     wallpapers_src = SCRIPT_DIR / "userdata" / "wallpapers"
     if wallpapers_src.is_dir():
@@ -496,7 +513,54 @@ def _configure_sshd():
     log_step("sshd enabled and started.")
 
 
-# ─── Step 9: Apply chezmoi dotfiles ──────────────────────────────────────────
+# ─── Step 9: Set up Tailscale ────────────────────────────────────────────────
+
+
+def step_setup_tailscale():
+    log_step("Setting up Tailscale...")
+    if not shutil.which("tailscale"):
+        log_warn("tailscale not found — install native packages first.")
+        return
+
+    subprocess.run(["sudo", "systemctl", "enable", "--now", "tailscaled.service"])
+
+    auth_key = _read_optional_secret(TAILSCALE_AUTH_KEY_STAGING_PATH)
+    if auth_key:
+        log_step(f"Using staged Tailscale auth key from {TAILSCALE_AUTH_KEY_STAGING_PATH}.")
+        # Tailscale recommends passing reusable auth keys via environment variables
+        # instead of embedding them directly in the command line or shell history.
+        env = os.environ.copy()
+        env["TS_AUTH_KEY"] = auth_key
+        result = subprocess.run(
+            [
+                "sudo",
+                "--preserve-env=TS_AUTH_KEY",
+                "sh",
+                "-c",
+                'tailscale up --auth-key="$TS_AUTH_KEY"',
+            ],
+            env=env,
+        )
+        if result.returncode == 0:
+            TAILSCALE_AUTH_KEY_STAGING_PATH.unlink(missing_ok=True)
+            log_step("Tailscale connected and staged auth key removed.")
+            RUNTIME.record_event("setup-tailscale", mode="auth-key")
+        else:
+            log_warn("Tailscale auth-key login failed. Staged key left in place for retry.")
+        return
+
+    print("  No staged Tailscale auth key found.")
+    print("  The next command will print a browser login URL for interactive sign-in.")
+    if not confirm("Continue with interactive Tailscale login? [y/N] "):
+        log_warn("Skipped Tailscale login.")
+        return
+
+    subprocess.run(["sudo", "tailscale", "up"])
+    RUNTIME.record_event("setup-tailscale", mode="interactive")
+    log_step("Tailscale login attempted.")
+
+
+# ─── Step 10: Apply chezmoi dotfiles ─────────────────────────────────────────
 
 
 def step_apply_chezmoi():
@@ -549,7 +613,7 @@ def step_apply_chezmoi():
     log_step("Chezmoi dotfiles applied.")
 
 
-# ─── Step 10: Set hostname ──────────────────────────────────────────────────
+# ─── Step 11: Set hostname ──────────────────────────────────────────────────
 
 
 def step_set_hostname():
@@ -572,7 +636,7 @@ def step_set_hostname():
         log_step(f"Keeping existing hostname: {current}.")
 
 
-# ─── Step 11: Set default shell to fish ──────────────────────────────────────
+# ─── Step 12: Set default shell to fish ──────────────────────────────────────
 
 
 def step_set_fish_shell():
@@ -584,7 +648,7 @@ def step_set_fish_shell():
     log_step("Default shell set to fish. Log out and back in for it to take effect.")
 
 
-# ─── Step 12: Apply system configs ───────────────────────────────────────────
+# ─── Step 13: Apply system configs ───────────────────────────────────────────
 
 
 def _root_filesystem_type():
@@ -695,7 +759,7 @@ def step_apply_system_configs(hw):
     log_step("System configs applied.")
 
 
-# ─── Step 13: Post-install reminders ─────────────────────────────────────────
+# ─── Step 14: Post-install reminders ─────────────────────────────────────────
 
 
 def step_post_install():
@@ -709,7 +773,8 @@ def step_post_install():
   6.  Log in to Niri — Noctalia will auto-download plugins on first launch
         (plugin list managed via ~/.config/noctalia/plugins.json)
   7.  Verify the Ollama coding model is available:  ollama list
-  8.  Set OPENAI_API_KEY before using aider or Continue with hosted models"""
+  8.  Verify Tailscale is connected:  tailscale status
+  9.  Set OPENAI_API_KEY before using aider or Continue with hosted models"""
     print(checklist)
     print()
     log_step("Done! Reboot when ready.")
@@ -749,11 +814,12 @@ STEP_NAMES = {
     6: "Pull default Ollama coding model",
     7: "Install VS Code extensions",
     8: "Install secrets (Claude, git, SSH from USB)",
-    9: "Apply chezmoi dotfiles",
-    10: "Set hostname",
-    11: "Set default shell to fish",
-    12: "Apply system configs",
-    13: "Post-install checklist",
+    9: "Set up Tailscale",
+    10: "Apply chezmoi dotfiles",
+    11: "Set hostname",
+    12: "Set default shell to fish",
+    13: "Apply system configs",
+    14: "Post-install checklist",
 }
 
 
@@ -815,11 +881,12 @@ def main():
         "6": step_pull_ollama_model,
         "7": step_install_vscode_extensions,
         "8": step_install_secrets,
-        "9": step_apply_chezmoi,
-        "10": step_set_hostname,
-        "11": step_set_fish_shell,
-        "12": lambda: step_apply_system_configs(hw),
-        "13": step_post_install,
+        "9": step_setup_tailscale,
+        "10": step_apply_chezmoi,
+        "11": step_set_hostname,
+        "12": step_set_fish_shell,
+        "13": lambda: step_apply_system_configs(hw),
+        "14": step_post_install,
     }
 
     if choice.lower() in ("y", "yes", "all"):
@@ -832,7 +899,7 @@ def main():
         RUNTIME.record_event("pre-snapshot")
         run_step(int(choice), steps[choice])
     else:
-        log_warn("Invalid choice. Run with a step number (1-13) or 'y' for all.")
+        log_warn("Invalid choice. Run with a step number (1-14) or 'y' for all.")
 
     if JSON_OUTPUT:
         RUNTIME.emit_summary(

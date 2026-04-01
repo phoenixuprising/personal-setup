@@ -188,6 +188,7 @@ sudo
 switcheroo-control
 sysfsutils
 system-config-printer
+tailscale
 texinfo
 tmux
 tmuxp

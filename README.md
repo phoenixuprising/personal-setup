@@ -4,7 +4,7 @@ Personal CachyOS desktop bootstrap, dotfiles, and local AI-tooling repository fo
 
 ## What’s in this repo
 
-- `setup.py`: interactive machine provisioning script (13 steps).
+- `setup.py`: interactive machine provisioning script (14 steps).
 - `probe-hardware.py`: captures target-machine hardware into `hardware-info.toml`.
 - `collect-secrets.py`: gathers credentials from the source machine into `secrets/` for USB transfer.
 - `media_transcribe.py`: repo-local transcription tool exposed through the `media-transcribe` CLI.
@@ -32,7 +32,7 @@ uv run python probe-hardware.py      # detect hardware for driver auto-install
 uv run python setup.py               # run all steps or pick individual ones
 ```
 
-`setup.py` can run all steps or a single numbered step. It handles package installation, service enablement, uv tool installation, VS Code extension installation, chezmoi setup, hostname/shell changes, and selected system config application.
+`setup.py` can run all steps or a single numbered step. It handles package installation, service enablement, uv tool installation, VS Code extension installation, secret staging, Tailscale setup, chezmoi setup, hostname/shell changes, and selected system config application.
 
 The repo now bootstraps a mixed AI coding setup:
 
@@ -53,6 +53,8 @@ ollama pull qwen2.5-coder:14b
 ```
 
 Hosted-model API keys are still user-specific. Set `OPENAI_API_KEY` in your shell environment before using Aider, and complete any key/sign-in prompts Continue shows on first launch.
+
+For unattended Tailscale setup, store a Tailscale auth key in 1Password as `system-ai Tailscale Auth Key` before running `uv run python collect-secrets.py`. The target machine stages that key at `~/.local/state/system-ai/tailscale-auth-key.txt`, passes it to `tailscale up` via an environment variable instead of embedding it directly in the command line, and deletes the staged file after a successful login. If no staged key is present, `setup.py` falls back to the normal interactive browser login flow.
 
 Most tools are moving toward a common CLI shape with `--json` summaries and `--log-format text|json` support so AI agents and shell automation can consume them reliably.
 

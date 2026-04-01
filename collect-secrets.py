@@ -12,6 +12,7 @@ Collected:
   - SSH config (~/.ssh/config, ~/.ssh/known_hosts)
   - SSH public key from 1Password (for authorized_keys on target)
   - 1Password account metadata
+  - Optional Tailscale auth key from 1Password
 """
 
 import argparse
@@ -28,6 +29,7 @@ SCRIPT_DIR = Path(__file__).parent.resolve()
 SECRETS_DIR = SCRIPT_DIR / "secrets"
 ENCRYPTED_FILE = SCRIPT_DIR / "secrets.age"
 OP_ITEM_TITLE = "system-ai Secrets Key"
+TAILSCALE_AUTH_KEY_ITEM_TITLE = "system-ai Tailscale Auth Key"
 RUNTIME = ToolRuntime("collect-secrets")
 
 
@@ -143,6 +145,24 @@ def collect_all():
             collected += 1
     except subprocess.TimeoutExpired:
         RUNTIME.warn("1Password CLI timed out extracting SSH key")
+
+    # Optional Tailscale auth key for unattended `tailscale up` on the target
+    try:
+        result = subprocess.run(
+            ["op", "item", "get", TAILSCALE_AUTH_KEY_ITEM_TITLE, "--fields", "password", "--reveal"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            tailscale_key_file = SECRETS_DIR / "tailscale-auth-key.txt"
+            tailscale_key_file.write_text(result.stdout.strip() + "\n")
+            tailscale_key_file.chmod(0o600)
+            RUNTIME.info(
+                "Collected Tailscale auth key",
+                destination=str(tailscale_key_file.relative_to(SCRIPT_DIR)),
+            )
+            collected += 1
+    except subprocess.TimeoutExpired:
+        RUNTIME.warn("1Password CLI timed out extracting Tailscale auth key")
 
     return collected
 
