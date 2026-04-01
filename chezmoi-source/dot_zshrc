@@ -1,1 +1,3 @@
 source /usr/share/cachyos-zsh-config/cachyos-config.zsh
+
+alias codex-local='codex --oss --local-provider ollama -m qwen2.5-coder:14b'
