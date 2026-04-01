@@ -559,19 +559,17 @@ def step_set_hostname():
     ).stdout.strip()
     print(f"  Current hostname: {current}")
     if ASSUME_YES:
-        subprocess.run(["sudo", "hostnamectl", "set-hostname", "polaris-1"])
-        log_step("Hostname set to polaris-1.")
+        log_step(f"Keeping existing hostname: {current}.")
         return
-    choice = input("Set hostname to polaris-1? [y/N] or type a different name: ").strip()
+    choice = input(
+        f"Press Enter to keep hostname '{current}', or type a different name: "
+    ).strip()
 
-    if choice.lower() in ("y", "yes"):
-        subprocess.run(["sudo", "hostnamectl", "set-hostname", "polaris-1"])
-        log_step("Hostname set to polaris-1.")
-    elif choice.lower() in ("n", "no", ""):
-        log_warn("Skipped hostname setup.")
-    else:
+    if choice:
         subprocess.run(["sudo", "hostnamectl", "set-hostname", choice])
         log_step(f"Hostname set to {choice}.")
+    else:
+        log_step(f"Keeping existing hostname: {current}.")
 
 
 # ─── Step 11: Set default shell to fish ──────────────────────────────────────
@@ -752,7 +750,7 @@ STEP_NAMES = {
     7: "Install VS Code extensions",
     8: "Install secrets (Claude, git, SSH from USB)",
     9: "Apply chezmoi dotfiles",
-    10: "Set hostname (polaris-1)",
+    10: "Set hostname",
     11: "Set default shell to fish",
     12: "Apply system configs",
     13: "Post-install checklist",

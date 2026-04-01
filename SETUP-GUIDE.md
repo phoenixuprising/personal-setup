@@ -60,7 +60,7 @@ Here's what each does:
 | 7 | Install VS Code extensions (currently Continue) | No |
 | 8 | Install secrets (Claude creds, git config, SSH keys, sshd) | No |
 | 9 | Apply chezmoi dotfiles (fish config, alacritty, AI harness configs, etc.) | No |
-| 10 | Set hostname to polaris-1 | No |
+| 10 | Keep current hostname or set a new one | No |
 | 11 | Set default shell to fish | No |
 | 12 | Apply system configs (mkinitcpio, locale, limine, Snapper) | No |
 | 13 | Print post-install checklist | No |
