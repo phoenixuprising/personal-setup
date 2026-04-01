@@ -542,7 +542,10 @@ def step_apply_chezmoi():
     if not confirm("Apply chezmoi dotfiles? [y/N] "):
         log_warn("Skipped chezmoi apply. Run 'chezmoi apply' manually when ready.")
         return
-    subprocess.run(["chezmoi", "apply"])
+    apply_cmd = ["chezmoi", "apply"]
+    if ASSUME_YES:
+        apply_cmd.append("--force")
+    subprocess.run(apply_cmd)
     log_step("Chezmoi dotfiles applied.")
 
 
@@ -632,7 +635,24 @@ def _configure_snapper_root():
         log_warn(f"Snapper root config failed: {stderr}")
 
 
-def step_apply_system_configs():
+def _apply_intel_gpu_perf_sysctls(sysconf: Path, hw) -> None:
+    """Enable non-root Intel GPU telemetry on machines with an Intel iGPU."""
+    if not has_intel_igpu(hw):
+        return
+
+    sysctl_dir = sysconf / "sysctl.d"
+    if not sysctl_dir.is_dir():
+        log_warn("system-config/sysctl.d not found — skipping Intel GPU perf sysctls.")
+        return
+
+    for src in sorted(sysctl_dir.glob("*.conf")):
+        dest = Path("/etc/sysctl.d") / src.name
+        print(f"  Copying {src.relative_to(sysconf)}")
+        subprocess.run(["sudo", "cp", str(src), str(dest)])
+        subprocess.run(["sudo", "sysctl", "-e", "--load", str(dest)])
+
+
+def step_apply_system_configs(hw):
     log_step("Applying system configuration files...")
     sysconf = SCRIPT_DIR / "system-config"
     if not sysconf.is_dir():
@@ -645,7 +665,10 @@ def step_apply_system_configs():
         log_warn("Will overwrite /etc/mkinitcpio.conf")
         if confirm("Apply mkinitcpio.conf? [y/N] "):
             subprocess.run(["sudo", "cp", str(mkinitcpio), "/etc/mkinitcpio.conf"])
-            subprocess.run(["sudo", "mkinitcpio", "-P"])
+            if shutil.which("limine-mkinitcpio"):
+                subprocess.run(["sudo", "limine-mkinitcpio"])
+            else:
+                subprocess.run(["sudo", "mkinitcpio", "-P"])
 
     # locale
     for f in ("locale.conf", "vconsole.conf"):
@@ -668,6 +691,7 @@ def step_apply_system_configs():
         if confirm("Apply sddm.conf? [y/N] "):
             subprocess.run(["sudo", "cp", str(sddm), "/etc/sddm.conf"])
 
+    _apply_intel_gpu_perf_sysctls(sysconf, hw)
     _configure_snapper_root()
 
     log_step("System configs applied.")
@@ -796,7 +820,7 @@ def main():
         "9": step_apply_chezmoi,
         "10": step_set_hostname,
         "11": step_set_fish_shell,
-        "12": step_apply_system_configs,
+        "12": lambda: step_apply_system_configs(hw),
         "13": step_post_install,
     }
 
