@@ -2,35 +2,33 @@
 set -euo pipefail
 
 UFW_RULE_DIR="{{ .chezmoi.homeDir }}/.local/share/system-ai/ufw"
-USER_RULES_SRC="${UFW_RULE_DIR}/user.rules"
-USER6_RULES_SRC="${UFW_RULE_DIR}/user6.rules"
-USER_RULES_DEST="/etc/ufw/user.rules"
-USER6_RULES_DEST="/etc/ufw/user6.rules"
+RULES_FILE="${UFW_RULE_DIR}/rules.txt"
 
 if ! command -v ufw >/dev/null 2>&1; then
   echo "ufw not installed; skipping UFW sync" >&2
   exit 0
 fi
 
-if [[ ! -f "${USER_RULES_SRC}" || ! -f "${USER6_RULES_SRC}" ]]; then
-  echo "chezmoi-managed UFW rules not found in ${UFW_RULE_DIR}; skipping sync" >&2
+if [[ ! -f "${RULES_FILE}" ]]; then
+  echo "chezmoi-managed UFW rules not found in ${RULES_FILE}; skipping sync" >&2
   exit 0
-fi
-
-sudo install -m 600 "${USER_RULES_SRC}" "${USER_RULES_DEST}"
-sudo install -m 600 "${USER6_RULES_SRC}" "${USER6_RULES_DEST}"
-
-if ! sudo cmp -s "${USER_RULES_SRC}" "${USER_RULES_DEST}"; then
-  echo "UFW sync failed: ${USER_RULES_DEST} does not match managed source" >&2
-  exit 1
-fi
-
-if ! sudo cmp -s "${USER6_RULES_SRC}" "${USER6_RULES_DEST}"; then
-  echo "UFW sync failed: ${USER6_RULES_DEST} does not match managed source" >&2
-  exit 1
 fi
 
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
+
+while IFS= read -r rule; do
+  [[ -z "${rule}" ]] && continue
+  sudo ufw allow "${rule}"
+done < "${RULES_FILE}"
+
 sudo ufw --force enable
 sudo ufw reload
+
+while IFS= read -r rule; do
+  [[ -z "${rule}" ]] && continue
+  if ! sudo ufw status | grep -Fq "${rule}"; then
+    echo "UFW sync failed: expected rule '${rule}' not present in ufw status output" >&2
+    exit 1
+  fi
+done < "${RULES_FILE}"
