@@ -6,3 +6,5 @@ __pycache__/
 media-transcribe*.log
 media-transcribe*.txt
 media-transcribe*.wav
+test-vm/*.qcow2
+test-vm/*_VARS.fd

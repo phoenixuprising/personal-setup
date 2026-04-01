@@ -194,6 +194,14 @@ def step_enable_system_services():
             continue
         print(f"  Enabling {svc}")
         subprocess.run(["sudo", "systemctl", "enable", svc])
+
+    # Group memberships required by enabled services
+    user = os.environ.get("USER", "phoenix")
+    groups = ["libvirt"]
+    for group in groups:
+        print(f"  Adding {user} to {group}")
+        subprocess.run(["sudo", "usermod", "-aG", group, user])
+
     log_step("System services enabled.")
 
 
@@ -216,6 +224,8 @@ def read_uv_tool_specs():
     specs = []
     for line in read_list("uv-tools.txt"):
         if line.startswith("-"):
+            continue
+        if "local checkout" in line:
             continue
         specs.append(line.split()[0])
     return specs

@@ -1,10 +1,15 @@
 1password
 1password-cli
 chezmoi
+claude-agent-acp
+codex-acp
+goose-desktop
 google-chrome
 kdeconnect-git
 nb
 neomutt-git
 restic-git
+rustdesk-bin
 sddm-astronaut-theme
 spotify
+vagrant

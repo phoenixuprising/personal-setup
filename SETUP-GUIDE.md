@@ -55,7 +55,7 @@ Here's what each does:
 | 2 | Install AUR packages (yay) | Yes |
 | 3 | Enable system services (bluetooth, NetworkManager, etc.) | No |
 | 4 | Enable user services (pipewire, etc.) | No |
-| 5 | Install uv tools (forgetful-ai, jcodemunch-mcp) | Yes |
+| 5 | Install uv tools (forgetful-ai, jcodemunch-mcp, command-help-parser if checked out locally) | Yes |
 | 6 | Install secrets (Claude creds, git config, SSH keys, sshd) | No |
 | 7 | Apply chezmoi dotfiles (fish config, alacritty, etc.) | No |
 | 8 | Set hostname to polaris-1 | No |
